@@ -1,0 +1,37 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Streamlit secrets and credentials
+.streamlit/credentials.toml
+.streamlit/secrets.toml
+
+# Environment files (contains keys/tokens)
+.env
+.env.*
+!.env.example
+
+# Databases and database caches
+*.db
+*.db-journal
+*.sqlite
+database/*.db
+database/*.sqlite
+
+# OS and IDE files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+
+# Project specific PDF or artifacts if desired
+# Review stock prediction idea.pdf
