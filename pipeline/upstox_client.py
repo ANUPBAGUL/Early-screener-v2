@@ -40,7 +40,7 @@ class UpstoxClient:
             "grant_type": "authorization_code"
         }
         
-        response = requests.post(url, headers=headers, data=data)
+        response = requests.post(url, headers=headers, data=data, timeout=10)
         if response.status_code == 200:
             token_data = response.json()
             self.access_token = token_data.get("access_token")
@@ -69,7 +69,7 @@ class UpstoxClient:
         if from_date:
             url += f"/{from_date}"
             
-        response = requests.get(url, headers=self._get_headers())
+        response = requests.get(url, headers=self._get_headers(), timeout=10)
         if response.status_code == 200:
             return response.json().get("data", {}).get("candles", [])
         else:

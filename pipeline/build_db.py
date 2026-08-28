@@ -19,24 +19,58 @@ def get_db_connection():
 
 def fetch_top_stocks():
     """
-    Downloads the master instrument list from Upstox and selects 700 equities.
+    Fetches the Nifty Total Market Index constituents (752 stocks) and complements 
+    it with the top active corporate equities from the Upstox NSE EQ list, 
+    bringing the tracking universe to exactly 1,000 stocks.
     """
+    import requests
+    import io
+
+    # 1. Fetch Nifty Total Market Index constituents from NSE
+    nifty_symbols = set()
+    try:
+        print("Downloading Nifty Total Market Index constituent list from NSE...")
+        url_nse = 'https://archives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv'
+        res = requests.get(url_nse, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        if res.status_code == 200:
+            nse_df = pd.read_csv(io.StringIO(res.text))
+            if 'Symbol' in nse_df.columns:
+                nifty_symbols = set(nse_df['Symbol'].str.strip().tolist())
+                print(f"Loaded {len(nifty_symbols)} symbols from Nifty Total Market Index.")
+    except Exception as e:
+        print(f"Warning: Could not fetch Nifty Total Market list: {e}")
+
+    # 2. Fetch Upstox NSE instrument list
     print("Fetching master instrument list from Upstox...")
-    url = 'https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz'
-    df = pd.read_csv(url)
+    url_upstox = 'https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz'
+    df = pd.read_csv(url_upstox)
     
     # Filter for standard equities (not ETFs or options)
     df = df[(df['instrument_type'] == 'EQUITY') & (df['exchange'] == 'NSE_EQ')]
+    df = df[df['tradingsymbol'].str.match(r'^[A-Z\-&]+$', na=False)]
+    df = df[~df['tradingsymbol'].str.endswith('ETF', na=False)]
+    df = df[~df['tradingsymbol'].str.contains('ETF', na=False)]
     
-    # We'll select the top 700 by just slicing (Upstox usually orders them somewhat by relevance/alphabetically)
-    # To be safer against penny stocks, we'll ensure price > 50
     df['last_price'] = pd.to_numeric(df['last_price'], errors='coerce')
     df = df[df['last_price'] > 50.0]
     
-    top_700 = df.head(700)
+    # Split into Nifty Total Market and Others
+    df['is_nifty_total'] = df['tradingsymbol'].apply(lambda x: x in nifty_symbols)
+    
+    nifty_df = df[df['is_nifty_total'] == True].copy()
+    others_df = df[df['is_nifty_total'] == False].copy()
+    
+    # Sort others by last price or just keep them
+    others_df = others_df.sort_values(by='last_price', ascending=False)
+    
+    # Combine Nifty Total Market + Others up to 1000
+    needed_others = 1000 - len(nifty_df)
+    combined_df = pd.concat([nifty_df, others_df.head(needed_others)])
+    
+    print(f"Final compiled universe size: {len(combined_df)} stocks (contains all available Nifty Total Market constituents).")
     
     stocks = []
-    for _, row in top_700.iterrows():
+    for _, row in combined_df.iterrows():
         stocks.append({
             "symbol": row['tradingsymbol'],
             "instrument_key": row['instrument_key']
@@ -127,7 +161,7 @@ def build_database():
                 timestamp, open_p, high_p, low_p, close_p, volume, _ = candle
                 
                 cursor.execute("""
-                    INSERT OR IGNORE INTO price_history 
+                    INSERT OR REPLACE INTO price_history 
                     (instrument_key, timestamp, open, high, low, close, volume)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (inst_key, timestamp, open_p, high_p, low_p, close_p, volume))
