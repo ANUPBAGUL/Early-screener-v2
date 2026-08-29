@@ -2,9 +2,13 @@ import pandas as pd
 import numpy as np
 import sqlite3
 import os
+import sys
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(PROJECT_ROOT, "database", "screener.db")
+# Centralized config integration
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import config
+
+DB_PATH = config.DB_PATH
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
@@ -52,6 +56,12 @@ def calculate_technical_features(df):
     
     df['stage_2_flag'] = (cond1 & cond2 & cond3 & cond4 & cond5 & cond6 & cond7).astype(int)
     
+    # 5. Pivot High — VCP Breakout Trigger Price
+    # The max high over the last 15 trading days represents the tightest consolidation
+    # handle peak. A stock trading above this level intraday (on volume) is the true
+    # breakout trigger. This replaces the misleading "enter at yesterday's close" assumption.
+    df['pivot_high'] = df['high'].rolling(window=15).max()
+    
     return df
 
 def run_feature_engineering():
@@ -68,8 +78,20 @@ def run_feature_engineering():
     instruments = [row[0] for row in cursor.fetchall()]
     
     total_inserted = 0
+    from datetime import datetime
+    to_date = datetime.today().strftime('%Y-%m-%d')
+    
+    # Schema migration: add pivot_high column if it doesn't exist (existing DB support)
+    try:
+        cursor.execute("ALTER TABLE technical_features ADD COLUMN pivot_high REAL")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
     
     for inst in instruments:
+        # Delete today's recorded features first to prevent incomplete intraday calculation poisoning
+        cursor.execute("DELETE FROM technical_features WHERE instrument_key = ? AND timestamp LIKE ?", (inst, to_date + "%"))
+        
         # Check incremental checkpoint (only if sma_50 is already populated in DB)
         # If sma_50 is NULL for the max timestamp, we force recalculate for this stock
         cursor.execute("""
@@ -111,7 +133,8 @@ def run_feature_engineering():
                 row['sma_150'],
                 row['sma_200'],
                 row['high_52w'],
-                row['stage_2_flag']
+                row['stage_2_flag'],
+                row.get('pivot_high')
             )
             for _, row in df.iterrows()
         ]
@@ -120,8 +143,8 @@ def run_feature_engineering():
         cursor.executemany("""
             INSERT OR REPLACE INTO technical_features 
             (instrument_key, timestamp, volatility_contraction_score, volume_surge_score, momentum_score,
-             sma_50, sma_150, sma_200, high_52w, stage_2_flag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             sma_50, sma_150, sma_200, high_52w, stage_2_flag, pivot_high)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, insert_data)
         
         total_inserted += len(insert_data)

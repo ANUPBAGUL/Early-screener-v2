@@ -1,17 +1,16 @@
 import os
 import sqlite3
 import pandas as pd
-from dotenv import load_dotenv
 from upstox_client import UpstoxClient
 import time
 from datetime import datetime, timedelta
+import sys
 
-# Load environment variables
-env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
-load_dotenv(dotenv_path=env_path, override=True)
+# Centralized config integration
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import config
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(PROJECT_ROOT, "database", "screener.db")
+DB_PATH = config.DB_PATH
 
 def get_db_connection():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -21,7 +20,7 @@ def fetch_top_stocks():
     """
     Fetches the Nifty Total Market Index constituents (752 stocks) and complements 
     it with the top active corporate equities from the Upstox NSE EQ list, 
-    bringing the tracking universe to exactly 1,000 stocks.
+    bringing the tracking universe to exactly config.UNIVERSE_LIMIT stocks.
     """
     import requests
     import io
@@ -63,8 +62,8 @@ def fetch_top_stocks():
     # Sort others by last price or just keep them
     others_df = others_df.sort_values(by='last_price', ascending=False)
     
-    # Combine Nifty Total Market + Others up to 1000
-    needed_others = 1000 - len(nifty_df)
+    # Combine Nifty Total Market + Others up to configuration limit
+    needed_others = config.UNIVERSE_LIMIT - len(nifty_df)
     combined_df = pd.concat([nifty_df, others_df.head(needed_others)])
     
     print(f"Final compiled universe size: {len(combined_df)} stocks (contains all available Nifty Total Market constituents).")
@@ -81,7 +80,7 @@ def initialize_database():
     print("Initializing Database...")
     conn = get_db_connection()
     # Execute the schema.sql
-    schema_path = os.path.join(PROJECT_ROOT, "database", "schema.sql")
+    schema_path = os.path.join(config.PROJECT_ROOT, "database", "schema.sql")
     if os.path.exists(schema_path):
         with open(schema_path, 'r') as f:
             conn.executescript(f.read())
@@ -123,18 +122,15 @@ def build_database():
         """, (inst_key, symbol))
         
         # 1.5 Determine from_date dynamically (Incremental Update)
+        # Delete today's recorded candle first to prevent incomplete intraday candle poisoning
+        cursor.execute("DELETE FROM price_history WHERE instrument_key = ? AND timestamp LIKE ?", (inst_key, to_date + "%"))
+        
         cursor.execute("SELECT MAX(timestamp) FROM price_history WHERE instrument_key = ?", (inst_key,))
         result = cursor.fetchone()
         
         if result and result[0]:
             # Extract the date part (e.g., '2024-08-25T00:00:00+05:30' -> '2024-08-25')
             last_date_str = result[0].split('T')[0]
-            
-            # If the last date in DB is today, skip fetching entirely
-            if last_date_str == to_date:
-                print(f"[{idx+1}/{len(stocks)}] {symbol} is already up to date. Skipping.")
-                continue
-                
             from_date = last_date_str
             print(f"[{idx+1}/{len(stocks)}] Fetching {symbol} from {from_date}...")
         else:
@@ -182,6 +178,15 @@ def build_database():
             
     conn.close()
     print("Database build complete!")
+    
+    # Automatically synchronize fundamentals
+    try:
+        from pipeline.fetch_fundamentals import update_fundamentals
+        print("Starting automatic fundamental synchronization...")
+        update_fundamentals()
+    except Exception as fe:
+        print(f"Failed to automatically update fundamentals: {fe}")
+        
     return stats
 
 if __name__ == "__main__":

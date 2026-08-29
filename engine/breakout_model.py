@@ -5,10 +5,15 @@ import os
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score
+from datetime import datetime, timedelta
+import sys
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(PROJECT_ROOT, "database", "screener.db")
-MODEL_PATH = os.path.join(PROJECT_ROOT, "engine", "breakout_model.json")
+# Centralized config integration
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import config
+
+DB_PATH = config.DB_PATH
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "breakout_model.json")
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
@@ -21,9 +26,9 @@ def prepare_data():
     print("Loading data from database...")
     conn = get_connection()
     
-    # Fetch price history for labeling
+    # Fetch price history for labeling (including high and low for path-dependent simulation)
     prices_df = pd.read_sql_query("""
-        SELECT instrument_key, timestamp, close 
+        SELECT instrument_key, timestamp, open, high, low, close 
         FROM price_history 
         ORDER BY instrument_key, timestamp ASC
     """, conn)
@@ -34,29 +39,77 @@ def prepare_data():
         FROM technical_features
     """, conn)
     
+    # Fetch fundamental snapshot (taken at model-training time, not at each historical date)
+    # This eliminates the look-ahead bias of joining current-day fundamentals at query time.
+    fundamentals_df = pd.read_sql_query("""
+        SELECT instrument_key, debt_to_equity, price_to_book, roce
+        FROM stocks
+    """, conn)
+    
     conn.close()
     
     print("Labeling historical breakouts...")
-    # Calculate subsequent 20-day returns for each stock
+    # Calculate subsequent 20-day returns for each stock using path-dependent simulation
+    # (Checking if TP is hit before SL is hit in subsequent 20 trading days)
     labeled_dfs = []
     for inst, group in prices_df.groupby('instrument_key'):
         group = group.sort_values('timestamp').copy()
         
-        # Max close in the subsequent 20 trading days (excluding current day)
-        group['future_max_close'] = group['close'].shift(-1).iloc[::-1].rolling(window=20, min_periods=1).max().iloc[::-1]
+        close_arr = group['close'].values
+        high_arr = group['high'].values
+        low_arr = group['low'].values
+        n = len(group)
         
-        # Calculate subsequent return
-        group['subsequent_return'] = (group['future_max_close'] - group['close']) / group['close']
+        labels = np.zeros(n, dtype=int)
+        subsequent_returns = np.zeros(n, dtype=float)
+        days_to_target = np.zeros(n, dtype=int)
         
-        # Label: 1 if return >= 50% in subsequent 20 days, else 0
-        group['label'] = (group['subsequent_return'] >= 0.50).astype(int)
+        for i in range(n):
+            if i + 20 >= n:
+                labels[i] = 0
+                subsequent_returns[i] = 0.0
+                days_to_target[i] = 0
+                continue
+                
+            close_val = close_arr[i]
+            sl_price = close_val * (1.0 - 0.075)
+            tp_price = close_val * (1.0 + config.BREAKOUT_LABEL_THRESHOLD)
+            
+            # Check subsequent 20 trading days path
+            for j in range(i + 1, i + 21):
+                day_low = low_arr[j]
+                day_high = high_arr[j]
+                
+                # Check stop loss first (pessimistic)
+                if day_low <= sl_price:
+                    labels[i] = 0
+                    subsequent_returns[i] = -0.075
+                    days_to_target[i] = j - i
+                    break
+                elif day_high >= tp_price:
+                    labels[i] = 1
+                    subsequent_returns[i] = config.BREAKOUT_LABEL_THRESHOLD
+                    days_to_target[i] = j - i
+                    break
+            else:
+                # Time exit on day 20 close
+                day_20_close = close_arr[i + 20]
+                ret_val = (day_20_close - close_val) / close_val
+                subsequent_returns[i] = ret_val
+                labels[i] = 1 if ret_val >= config.BREAKOUT_LABEL_THRESHOLD else 0
+                days_to_target[i] = 20
+                
+        group['label'] = labels
+        group['subsequent_return'] = subsequent_returns
+        group['days_to_target'] = days_to_target
         
-        labeled_dfs.append(group[['instrument_key', 'timestamp', 'subsequent_return', 'label']])
+        labeled_dfs.append(group[['instrument_key', 'timestamp', 'subsequent_return', 'label', 'days_to_target']])
         
     labeled_df = pd.concat(labeled_dfs, ignore_index=True)
     
-    # Merge features with labels
+    # Merge features with labels, then attach fundamental snapshot
     data = pd.merge(features_df, labeled_df, on=['instrument_key', 'timestamp'], how='inner')
+    data = pd.merge(data, fundamentals_df, on='instrument_key', how='left')
     
     return data
 
@@ -69,6 +122,10 @@ def train_and_save_model():
     
     # Drop rows where base features are null
     data = data.dropna(subset=['volatility_contraction_score', 'volume_surge_score'])
+    
+    # Drop in-flight setups (unevaluated in the last 20 days of the dataset)
+    if 'days_to_target' in data.columns:
+        data = data[data['days_to_target'] > 0]
     
     # Separate features and labels
     feature_cols = ['volatility_contraction_score', 'volume_surge_score', 'momentum_score']
@@ -83,8 +140,10 @@ def train_and_save_model():
         print("ERROR: No historical breakouts found with >= 50% gain in 20 days. Cannot train model.")
         return
         
-    # Split temporally to prevent leakage (Train: before 2026, Test: 2026 onwards)
-    train_mask = data['timestamp'] < '2026-01-01'
+    # Split temporally to prevent leakage (Train: before 6 months ago, Test: last 6 months)
+    split_date = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
+    print(f"Using dynamic temporal split date (6 months ago): {split_date}")
+    train_mask = data['timestamp'] < split_date
     X_train, y_train = X[train_mask], y[train_mask]
     X_test, y_test = X[~train_mask], y[~train_mask]
     
@@ -128,6 +187,8 @@ def train_and_save_model():
 def populate_dna_library(data):
     """
     Saves true breakouts (subsequent_return >= 50%) to the multibagger_dna library.
+    Snapshots fundamental values (D/E, P/B, ROCE) at model-training time so the
+    6D similarity engine does not use stale current-day fundamentals for historical events.
     """
     print("\nPopulating Multibagger DNA Library...")
     # Filter for true breakout setups
@@ -139,6 +200,13 @@ def populate_dna_library(data):
     conn = get_connection()
     cursor = conn.cursor()
     
+    # --- Schema migration: add fundamental & days_to_target columns if they don't exist ---
+    for col_def in ["debt_to_equity REAL", "price_to_book REAL", "roce REAL", "days_to_target INTEGER"]:
+        try:
+            cursor.execute(f"ALTER TABLE multibagger_dna ADD COLUMN {col_def}")
+        except Exception:
+            pass  # Column already exists — safe to ignore
+    
     # Clean old library
     cursor.execute("DELETE FROM multibagger_dna")
     
@@ -149,15 +217,20 @@ def populate_dna_library(data):
             row['volatility_contraction_score'],
             row['volume_surge_score'],
             row['momentum_score'],
-            row['subsequent_return']
+            row['subsequent_return'],
+            row.get('debt_to_equity'),
+            row.get('price_to_book'),
+            row.get('roce'),
+            int(row['days_to_target']) if 'days_to_target' in row and row['days_to_target'] is not None else 20
         )
         for _, row in breakouts.iterrows()
     ]
     
     cursor.executemany("""
         INSERT OR REPLACE INTO multibagger_dna
-        (instrument_key, timestamp, volatility_contraction_score, volume_surge_score, momentum_score, subsequent_return)
-        VALUES (?, ?, ?, ?, ?, ?)
+        (instrument_key, timestamp, volatility_contraction_score, volume_surge_score, momentum_score,
+         subsequent_return, debt_to_equity, price_to_book, roce, days_to_target)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, insert_data)
     
     conn.commit()

@@ -1,0 +1,104 @@
+# Implementation Plan: Local GPU-Accelerated Option Skew Map
+
+This plan outlines the steps to build a local, GPU-accelerated option skew map that ingests option chain data, computes the 25-delta implied volatility skew using a PyTorch pricing engine, and maps stocks into a 4-quadrant sentiment board on a new Streamlit page.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **1. CUDA Acceleration vs. CPU Fallback**
+> Your current Python environment has the CPU-only version of PyTorch installed (`2.10.0+cpu`). We will design the mathematical engine using device-agnostic PyTorch code: it will auto-detect and utilize the GPU if `torch.cuda.is_available()` becomes true (e.g. if you install a CUDA-enabled PyTorch build later), and otherwise run via vectorized CPU tensors, which is still highly efficient.
+>
+> **2. NSE Option Chain Data Sourcing**
+> Automated scraping of the NSE website via nsepython/aiohttp is notoriously fragile due to Akamai blocking and dynamic cookie rotation. We propose fetching options data for Indian markets using your existing **Upstox API client**, which is stable, rate-limit friendly, and fully authenticated in the application. We will use `yfinance` to fetch the US options data.
+>
+> **3. Expiry Range Selection**
+> As per the reference document, we will target option expirations **30 to 45 days out** (filtering out weekly and short-term 0DTE options to remove noisy short-term gamma fluctuations).
+
+---
+
+## Proposed Changes
+
+### Component 1: Database Updates
+
+#### [MODIFY] [schema.sql](file:///d:/Projects/early%20screener/database/schema.sql)
+Add a new table `option_skew_history` to store daily skew snapshots for trend analysis:
+```sql
+CREATE TABLE IF NOT EXISTS option_skew_history (
+    symbol TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    underlying_close REAL NOT NULL,
+    atm_iv REAL,
+    put_iv_25d REAL,
+    call_iv_25d REAL,
+    skew_normalized REAL,
+    skew_raw REAL,
+    return_1m REAL,
+    rvol REAL,
+    earnings_date TEXT,
+    quadrant TEXT,
+    PRIMARY KEY (symbol, timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_skew_timestamp ON option_skew_history (timestamp);
+```
+
+---
+
+### Component 2: Core Ingestion & Mathematical Engine
+
+#### [NEW] [engine/skew_engine.py](file:///d:/Projects/early%20screener/engine/skew_engine.py)
+A high-performance PyTorch-based options pricing and interpolation engine.
+* **Vectorized Delta Calculation**: Implements the Black-Scholes-Merton Delta formula using PyTorch tensors for parallel calculation across thousands of contracts:
+  $$d_1 = \frac{\ln(S/K) + (r + \sigma^2/2)t}{\sigma\sqrt{t}}$$
+  $$\Delta_{\text{Call}} = N(d_1), \quad \Delta_{\text{Put}} = N(d_1) - 1$$
+* **IV Solver & Interpolation**: 
+  * Implements a vectorized linear/spline interpolation mapping calculated Delta to Implied Volatility.
+  * Backs out the exact implied volatility at `Delta = 0.25` (Call), `Delta = -0.25` (Put), and `Delta = 0.50` (ATM).
+  * Computes Skew measures:
+    * `skew_normalized = (put_iv_25d - call_iv_25d) / atm_iv`
+    * `skew_raw = put_iv_25d - call_iv_25d` (raw volatility points for cross-sector comparisons).
+* **Sanity Checks**: Rejects outliers where IV is zero/negative or ridiculously high (e.g. IV > 3.0), handling low-volume/thinly traded option noise as outlined in the reference document.
+
+#### [NEW] [pipeline/skew_pipeline.py](file:///d:/Projects/early%20screener/pipeline/skew_pipeline.py)
+Orchestrates the daily options data acquisition:
+* **US Market (yfinance)**: Fetches ticker options chains, targets expirations between 30 and 45 days, and extracts call/put strike, lastPrice, bid, ask, and IV.
+* **Indian Market (Upstox API)**: Resolves the active monthly option chain contracts for NSE equities/indices, fetches quotes, and builds standard price tables.
+* **Historical Returns & Rolling Skew**: Queries historical stock data to calculate 1-month returns and changes in skew compared to previous runs.
+* **Database Snapshot Saver**: Appends final calculations to `option_skew_history`.
+
+---
+
+### Component 3: Dashboard UI Setup
+
+#### [NEW] [pages/1_Option_Skew_Map.py](file:///d:/Projects/early%20screener/pages/1_Option_Skew_Map.py)
+Creating this file in a new `pages/` directory instructs Streamlit to automatically enable multi-page navigation. This page will display:
+* **Four-Quadrant Scatter Plot**: An interactive Plotly chart with 1-Month Return on the X-axis and 25-Delta Skew on the Y-axis.
+  * **Top-Right**: Hedged Rally (stock up, puts bid) - *Action: Tighten Stops*.
+  * **Bottom-Right**: Chase (stock up, calls bid) - *Action: Crowded Trade / Gamma Squeeze*.
+  * **Top-Left**: Fear (stock down, puts bid) - *Action: Leave it alone*.
+  * **Bottom-Left**: Contrarian Bid (stock down, calls bid) - *Action: Watchlist for Reversal*.
+* **Dynamic Sentence Explainer**: Hovering or selecting a stock prints the formatted sentence:
+  > **[Ticker]** — traders are paying **[slightly/clearly/heavily]** more for **[puts/calls]**, which is more **[fear/upside]** than **[X%]** of its sector. The stock is **[up/down X%]** on the month, on **[heavy/normal/light]** volume. That puts it in **[Quadrant]**.
+* **Filterable & Sliceable Database**: A detailed, searchable table of the skew records with sidebar filters for:
+  * Market Segment (US vs. Indian NSE)
+  * Sector / Theme
+  * Market Capitalization (Size)
+* **Compliance Guard**: Strictly filters and ensures that any alerts generated for US tickers specify the purchase of the **cash underlying equity only** to remain compliant with RBI LRS derivative trading bans.
+
+---
+
+## Verification Plan
+
+### Automated Tests
+* Create a test script `scratch/test_skew_calculations.py` to:
+  * Validate that the PyTorch pricing engine computes correct Black-Scholes Delta values for mock contracts compared to standard scipy/numpy calculations.
+  * Test the strike interpolation at exactly 25-delta.
+* Test yfinance US options chains ingestion for a subset of symbols (e.g. `AAPL`, `MSFT`).
+* Test Upstox NSE options chains ingestion for Nifty 50.
+
+### Manual Verification
+* Run Streamlit (`streamlit run app.py`).
+* Verify that the sidebar now displays the main page ("High-Growth & Multibagger Screener") and the new "Option Skew Map" page.
+* Check that the interactive scatter plot displays correctly and hover cards print the correct explanatory sentence.
+* Confirm that US tickers display cash-only equity labels.
