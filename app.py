@@ -147,6 +147,9 @@ def fetch_analogue_data(symbol, match_date):
     """
     Fetches price history for the historical match and slices it around the breakout date.
     """
+    if not symbol or pd.isna(symbol) or not match_date or pd.isna(match_date):
+        return None
+        
     conn = get_connection()
     query = """
     SELECT timestamp, close, volume
@@ -160,20 +163,24 @@ def fetch_analogue_data(symbol, match_date):
     if df.empty:
         return None
         
-    df['timestamp'] = pd.to_datetime(df['timestamp']).dt.date
-    match_dt = pd.to_datetime(match_date).date()
-    
-    # Find closest matching index
-    df['date_diff'] = df['timestamp'].apply(lambda x: abs((x - match_dt).days))
-    closest_idx = df['date_diff'].idxmin()
-    
-    # Slice 40 trading days before and 80 trading days after the breakout setup date
-    start_idx = max(0, closest_idx - 40)
-    end_idx = min(len(df) - 1, closest_idx + 80)
-    
-    sliced_df = df.iloc[start_idx:end_idx+1].copy()
-    sliced_df.set_index('timestamp', inplace=True)
-    return sliced_df[['close', 'volume']]
+    try:
+        df['timestamp'] = pd.to_datetime(df['timestamp']).dt.date
+        match_dt = pd.to_datetime(match_date).date()
+        
+        # Find closest matching index
+        df['date_diff'] = df['timestamp'].apply(lambda x: abs((x - match_dt).days))
+        closest_idx = df['date_diff'].idxmin()
+        
+        # Slice 40 trading days before and 80 trading days after the breakout setup date
+        start_idx = max(0, closest_idx - 40)
+        end_idx = min(len(df) - 1, closest_idx + 80)
+        
+        sliced_df = df.iloc[start_idx:end_idx+1].copy()
+        sliced_df.set_index('timestamp', inplace=True)
+        return sliced_df
+    except Exception as e:
+        print(f"Error slicing analogue data: {e}")
+        return None
 
 # --- Try Loading XGBoost Model ---
 xgb_loaded = False
@@ -1198,7 +1205,18 @@ if st.session_state.get('run_screener', False):
         flagged_syms = st.session_state.get('flagged_symbols', [])
         selected_stock = None
         if flagged_syms:
-            selected_stock = st.selectbox("Select a stock to view historical matches:", flagged_syms)
+            # Sync selectbox with table row click
+            default_stock = st.session_state.get('selected_stock_view')
+            default_idx = 0
+            if default_stock in flagged_syms:
+                default_idx = flagged_syms.index(default_stock)
+            selected_stock = st.selectbox(
+                "Select a stock to view historical matches:", 
+                flagged_syms, 
+                index=default_idx,
+                key="selected_stock_selectbox"
+            )
+            st.session_state['selected_stock_view'] = selected_stock
             
             # Catalyst & News Intelligence Expander
             with st.expander("🗞️ Catalyst & News Intelligence (Live Feed)"):
