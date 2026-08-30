@@ -568,6 +568,7 @@ if st.session_state.get('run_screener', False):
                         return f"🔵 Std Swing | Risk 1.0% | SL {sl}% | TP 15% GTT"
                         
                 scored_df['risk_review'] = scored_df.apply(get_strategy_suggestion, axis=1)
+                st.session_state['scored_df'] = scored_df
 
                 # E. Apply standard user sliders (Volume Surge, VCP, Similarity) for the Momentum Engine
                 tech_filtered_df = scored_df[
@@ -1244,9 +1245,17 @@ if st.session_state.get('run_screener', False):
         else:
             st.warning("⚠️ No stocks matched search filters across any of the archetype tabs. Try loosening parameters.")
         
-        if selected_stock and 'matched_records' in st.session_state:
+        if selected_stock:
             try:
-                record = st.session_state['matched_records'].get(selected_stock)
+                record = None
+                if 'matched_records' in st.session_state:
+                    record = st.session_state['matched_records'].get(selected_stock)
+                
+                if not record and 'scored_df' in st.session_state:
+                    sdf = st.session_state['scored_df']
+                    match_rows = sdf[sdf['symbol'] == selected_stock]
+                    if not match_rows.empty:
+                        record = match_rows.iloc[0].to_dict()
                 
                 if record:
                     match_sym = record['match_symbol']
