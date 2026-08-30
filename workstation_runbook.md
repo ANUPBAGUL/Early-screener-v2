@@ -1,0 +1,95 @@
+# High-Growth Screener: Operator Manual & Runbook
+**Target Audience**: Human Traders, Portfolio Managers, and AI Coding Assistants  
+**Location**: `d:\Projects\early screener\workstation_runbook.md`  
+
+---
+
+## 1. System Objective & Architecture
+
+This system is a quantitative stock discovery workstation designed for the Indian equity market (NSE/BSE). It isolates high-relative-strength breakout candidates (momentum markup) and early-stage microcap turnarounds (governance-backed accumulation).
+
+### Component Map
+* **Database (`database/screener.db`)**:
+  * `stocks`: Tickers, sectors, and fundamentals (MCAP, ROCE, Promoter %, CFO).
+  * `price_history`: Daily OHLCV candles (5 years lookback).
+  * `technical_features`: Rolling averages, VCP tightness, and Pivot High prices.
+  * `multibagger_dna`: Snapshotted technical states of 279,846 historical breakouts.
+* **Ingestion Pipeline**:
+  * `pipeline/build_db.py`: Fetches price history candles from Upstox.
+  * `pipeline/fetch_fundamentals.py`: Scrapes fundamentals from Screener.in (fallback to yfinance).
+* **Quant Engines**:
+  * `engine/feature_engineer.py`: Generates Bollinger/SMA VCP calculations and Pivot Highs.
+  * `engine/similarity_engine.py`: Matches setups against historical DNA using 3D Cosine Similarity.
+  * `engine/breakout_model.py`: Trains an XGBoost model on path-dependent labels.
+  * `engine/backtest_ledger.py`: Backtests the strategy with chronological cooldown rules.
+
+---
+
+## 2. Daily Operational Runbook
+
+Follow these commands to keep the workstation operational:
+
+### Step 1: End-of-Day Data Ingestion
+Run this command daily after market close (5:00 PM IST or later) to update prices and scrape fundamentals:
+```bash
+python pipeline/build_db.py
+```
+*Note: If the Screener.in scraper is rate-limited, it automatically falls back to Yahoo Finance.*
+
+### Step 2: Model Maintenance (Optional)
+The XGBoost model does not need daily training. Retrain only if you change the target parameter `BREAKOUT_LABEL_THRESHOLD` in `config.py`:
+```bash
+python engine/breakout_model.py
+```
+
+### Step 3: Launching the Dashboard
+Launch the Streamlit visual terminal to review candidates and backtest metrics:
+```bash
+streamlit run app.py
+```
+
+---
+
+## 3. Strategic Execution Blueprint (For Humans)
+
+To trade this strategy with positive mathematical expectancy, you must follow these rules:
+
+```
+                  [Nifty 50 Monthly 10 EMA Check]
+                                 │
+                   ┌─────────────┴─────────────┐
+             🟢 Above EMA                 🟡 Below EMA
+             (Bull Market)                (Bear Market)
+                   │                           │
+          Position Size: 1.0%         Position Size: 0.5%
+          (Max Risk per trade)        (Sized down by 50%)
+```
+
+### 1. Selection & Confluence
+* **Confluence Threshold**: Target candidates with a **Confluence Score $\ge 70\%$**.
+* **Sector Clustering**: Prioritize setups inside sectors displaying concurrent breakouts.
+
+### 2. The Execution (Pivot High Entry)
+* **Rule**: **Never buy at yesterday's close price or at the market open.**
+* **Action**: Identify the **Pivot High Price** printed by the tool. Place a **Buy Limit GTT (Good Till Triggered) Order** exactly at that price. This prevents entering consolidations that fail to break out.
+
+### 3. Sizing & Exits (Standard Mode vs. Microcap Mode)
+* **Standard Mode (Midcaps)**:
+  * Initial Stop-Loss: **-7.5%**
+  * Target Profit (50% position): **+15.0%** (2:1 Risk-Reward Ratio)
+* **Microcap Mode (Turnarounds)**:
+  * Initial Stop-Loss: **-15.0%** (wider for microcap volatility)
+  * Target Profit (50% position): **+15.0%**
+* **The Runner (Remaining 50%)**: Once the first half is sold at +15%, move the stop-loss to entry price (breakeven). Exit ONLY when the daily candle closes below the **50-day Moving Average**.
+
+---
+
+## 4. AI Developer Hand-off Notes (For Future AIs)
+
+When editing or maintaining this repository, you must adhere to these quantitative guardrails:
+
+> [!WARNING]
+> **Lookahead Bias Danger**: The database only holds *current* fundamental snapshots. Joining current fundamentals to past historical dates in vector searches or F-Score backtests introduces lookahead bias. The Cosine Similarity engine must remain **3D Technical-Only** (`volatility_contraction_score`, `volume_surge_score`, `momentum_score`).
+
+* **Model Training Alignment**: The XGBoost classifier is trained on path-dependent labels. Do not use simple closing return shifts (`shift(-20)`), as this ignores stopped-out trades.
+* **In-Flight Filter**: Always filter out active setups from the last 20 days of the training set (`days_to_target == 0`) to prevent the model from learning incomplete trades as failures.
