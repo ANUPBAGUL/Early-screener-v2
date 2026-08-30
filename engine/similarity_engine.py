@@ -47,7 +47,7 @@ def fetch_latest_features():
         WHERE rn <= 50
         GROUP BY instrument_key
     )
-    SELECT s.symbol, s.instrument_key, s.market_cap, s.debt_to_equity, s.revenue_growth, s.roce, s.peg_ratio, 
+    SELECT s.symbol, s.name, s.instrument_key, s.market_cap, s.debt_to_equity, s.revenue_growth, s.roce, s.peg_ratio, 
            s.pe_ratio, s.price_to_book, s.earnings_growth, s.interest_coverage, s.sector, v.vol_50d_avg,
            s.days_to_earnings, s.fundamentals_updated_at, s.data_quality,
            s.promoter_holding, s.operating_cash_flow,

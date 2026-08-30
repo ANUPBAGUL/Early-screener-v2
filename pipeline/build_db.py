@@ -72,7 +72,8 @@ def fetch_top_stocks():
     for _, row in combined_df.iterrows():
         stocks.append({
             "symbol": row['tradingsymbol'],
-            "instrument_key": row['instrument_key']
+            "instrument_key": row['instrument_key'],
+            "name": row.get('name', '')
         })
     return stocks
 
@@ -115,11 +116,12 @@ def build_database():
         symbol = stock['symbol']
         inst_key = stock['instrument_key']
         
-        # 1. Insert stock metadata
+        # 1. Insert stock metadata safely (ON CONFLICT update name, preserving fundamentals)
         cursor.execute("""
-            INSERT OR IGNORE INTO stocks (instrument_key, symbol, exchange) 
-            VALUES (?, ?, 'NSE')
-        """, (inst_key, symbol))
+            INSERT INTO stocks (instrument_key, symbol, name, exchange) 
+            VALUES (?, ?, ?, 'NSE')
+            ON CONFLICT(instrument_key) DO UPDATE SET name=excluded.name, symbol=excluded.symbol
+        """, (inst_key, symbol, stock.get('name', '')))
         
         # 1.5 Determine from_date dynamically (Incremental Update)
         # Delete today's recorded candle first to prevent incomplete intraday candle poisoning
