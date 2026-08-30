@@ -808,7 +808,8 @@ if st.session_state.get('run_screener', False):
                     st.markdown("---")
 
                 # Tab Structure
-                tab_all, tab_turnaround, tab_cyclical, tab_structural, tab_backtest = st.tabs([
+                tab_horizon, tab_all, tab_turnaround, tab_cyclical, tab_structural, tab_backtest = st.tabs([
+                    "⏳ Time Horizon Discovery",
                     "🔍 General Breakout", 
                     "🔄 Turnaround Multibagger", 
                     "📈 Cyclical Value", 
@@ -823,6 +824,81 @@ if st.session_state.get('run_screener', False):
 
                 if is_microcap_mode:
                     st.warning("🚀 **Ground-Floor Microcap Inflection Mode Active**: Enforcing ₹50-1,500 Cr Market Cap, 30k+ volume, and Governance Filters (Promoter >= 45%, Positive CFO). Sizing down to **0.5% allocation** is recommended.")
+
+                with tab_horizon:
+                    st.markdown("### ⏳ Time Horizon Discovery Dashboard")
+                    st.markdown("Simplify your stock selection by choosing setups matching your trading timeline.")
+                    
+                    col_h1, col_h2, col_h3 = st.columns(3)
+                    
+                    with col_h1:
+                        st.subheader("⚡ Intraday Watchlist (1-Day)")
+                        st.caption("Target quick 2% to 4% momentum moves. Exit before market close.")
+                        
+                        # Filter for high probability breakout candidates
+                        intra_candidates = scored_df[
+                            (scored_df['market_cap'] >= mcap_min) &
+                            (scored_df['market_cap'] <= mcap_max) &
+                            (scored_df['stage_2_flag'] == 1)
+                        ].sort_values(by='breakout_prob', ascending=False).head(5).copy()
+                        
+                        if not intra_candidates.empty:
+                            display_intra = intra_candidates[['symbol', 'pivot_high', 'breakout_prob', 'f_score']].copy()
+                            display_intra['pivot_high'] = display_intra['pivot_high'].round(2)
+                            display_intra = display_intra.rename(columns={
+                                'symbol': 'Symbol', 'pivot_high': '🎯 Buy GTT (₹)',
+                                'breakout_prob': 'Prob (%)', 'f_score': 'F-Score'
+                            })
+                            st.dataframe(display_intra, use_container_width=True, hide_index=True)
+                            st.info("💡 **Execution**: Enable the *Intraday Workstation* toggle below to receive live 15-min alerts when these trigger.")
+                        else:
+                            st.info("No intraday candidates found.")
+                            
+                    with col_h2:
+                        st.subheader("🎯 Swing Watchlist (20-Days)")
+                        st.caption("Target a +15% swing return on VCP breakout setups.")
+                        
+                        swing_candidates = tech_filtered_df[
+                            (tech_filtered_df['market_cap'] >= mcap_min) &
+                            (tech_filtered_df['market_cap'] <= mcap_max)
+                        ].sort_values(by='confluence_score', ascending=False).head(5).copy()
+                        
+                        if not swing_candidates.empty:
+                            display_swing = swing_candidates[['symbol', 'pivot_high', 'confluence_score', 'match_symbol', 'match_days']].copy()
+                            display_swing['pivot_high'] = display_swing['pivot_high'].round(2)
+                            display_swing = display_swing.rename(columns={
+                                'symbol': 'Symbol', 'pivot_high': '🎯 Buy GTT (₹)',
+                                'confluence_score': 'Confluence (%)', 'match_symbol': 'Match',
+                                'match_days': 'Days to TP'
+                            })
+                            st.dataframe(display_swing, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No swing candidates found.")
+                            
+                    with col_h3:
+                        st.subheader("💎 Long-Term Watch (Months/Years)")
+                        st.caption("Hold elite compounders; exit only below major trendlines.")
+                        
+                        long_candidates = scored_df[
+                            (scored_df['market_cap'] >= mcap_min) &
+                            (scored_df['market_cap'] <= mcap_max) &
+                            (scored_df['roce'] >= 0.18) &
+                            (scored_df['debt_to_equity'] <= 0.5) &
+                            (scored_df['stage_2_flag'] == 1)
+                        ].sort_values(by='confluence_score', ascending=False).head(5).copy()
+                        
+                        if not long_candidates.empty:
+                            display_long = long_candidates[['symbol', 'f_score', 'sma_50', 'sma_200']].copy()
+                            display_long['sma_50'] = display_long['sma_50'].round(1)
+                            display_long['sma_200'] = display_long['sma_200'].round(1)
+                            display_long = display_long.rename(columns={
+                                'symbol': 'Symbol', 'f_score': 'F-Score',
+                                'sma_50': '50D SMA (₹)', 'sma_200': '200D SMA (₹)'
+                            })
+                            st.dataframe(display_long, use_container_width=True, hide_index=True)
+                            st.info("💡 **Exit Rule**: Exit if the daily close drops below the 50D SMA or 200D SMA.")
+                        else:
+                            st.info("No long-term compounders found.")
 
                 with tab_all:
                     st.markdown("### 🔍 General Breakout Screener")
