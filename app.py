@@ -140,11 +140,10 @@ def fetch_analogue_data(symbol, match_date):
     """
     conn = get_connection()
     query = """
-    SELECT p.timestamp, p.close, p.volume
-    FROM price_history p
-    JOIN stocks s ON p.instrument_key = s.instrument_key
-    WHERE s.symbol = ?
-    ORDER BY p.timestamp ASC
+    SELECT timestamp, close, volume
+    FROM price_history
+    WHERE instrument_key = (SELECT instrument_key FROM stocks WHERE symbol = ? LIMIT 1)
+    ORDER BY timestamp ASC
     """
     df = pd.read_sql_query(query, conn, params=(symbol,))
     conn.close()
@@ -1234,11 +1233,10 @@ if st.session_state.get('run_screener', False):
                     conn = get_connection()
                     # Get last 250 trading days for the CURRENT stock
                     query = """
-                    SELECT p.timestamp, p.close, p.volume
-                    FROM price_history p
-                    JOIN stocks s ON p.instrument_key = s.instrument_key
-                    WHERE s.symbol = ?
-                    ORDER BY p.timestamp DESC
+                    SELECT timestamp, close, volume
+                    FROM price_history
+                    WHERE instrument_key = (SELECT instrument_key FROM stocks WHERE symbol = ? LIMIT 1)
+                    ORDER BY timestamp DESC
                     LIMIT 250
                     """
                     chart_df = pd.read_sql_query(query, conn, params=(selected_stock,))

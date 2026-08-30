@@ -73,3 +73,4 @@ CREATE INDEX IF NOT EXISTS idx_technical_features_instrument ON technical_featur
 CREATE INDEX IF NOT EXISTS idx_technical_features_timestamp ON technical_features(timestamp);
 CREATE INDEX IF NOT EXISTS idx_multibagger_dna_instrument ON multibagger_dna(instrument_key);
 CREATE INDEX IF NOT EXISTS idx_multibagger_dna_timestamp ON multibagger_dna(timestamp);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stocks_symbol ON stocks(symbol);

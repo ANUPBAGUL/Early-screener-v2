@@ -22,9 +22,15 @@ def fetch_latest_features():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Auto-migration guard: ensure new columns exist in technical_features & stocks
+    # Auto-migration guard: ensure new columns and indexes exist
     try:
         cursor.execute("ALTER TABLE technical_features ADD COLUMN pivot_high REAL")
+        conn.commit()
+    except Exception:
+        pass
+        
+    try:
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stocks_symbol ON stocks(symbol)")
         conn.commit()
     except Exception:
         pass
@@ -53,7 +59,7 @@ def fetch_latest_features():
            s.promoter_holding, s.operating_cash_flow,
            t.volatility_contraction_score, t.volume_surge_score, t.momentum_score,
            t.sma_50, t.sma_150, t.sma_200, t.high_52w, t.stage_2_flag, t.pivot_high,
-           t.volume_node_poc, t.volume_node_density,
+           t.volume_node_poc, t.volume_node_density, t.pbd_profile,
            p.close
     FROM technical_features t
     JOIN stocks s ON t.instrument_key = s.instrument_key
