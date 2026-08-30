@@ -160,13 +160,18 @@ The similarity score is paired with an **XGBoost Classifier** model trained on 1
 
 ---
 
-## 10. Strict Risk Management (The Hybrid Exit Strategy)
+## 10. Volatility-Adjusted Risk Management (The Hybrid Exit Strategy)
 
-The mathematics of momentum trading rely on asymmetric risk: keeping losses small and letting winners run. To allow the stock to compound into a true multibagger without selling too early, the system implements a **Dual-Allocation Hybrid Exit Strategy**:
+The mathematics of momentum trading rely on asymmetric risk: keeping losses small and letting winners run. To remove the rigidity of fixed percentage parameters, the system implements a **Volatility-Adjusted Risk Management Workspace**:
 
-1. **Initial Stop-Loss (7.5%)**: Enforces a strict stop-loss level at `Close Price * 0.925` for the entire position at start.
-2. **The Swing Exit (50% of position)**: Sell 50% of the shares when the stock hits a **30% profit target** (`Close Price * 1.30`).
-3. **The Multibagger Runner (50% of position)**: The remaining 50% shifts to a trailing stop-loss (daily close below 50-day or 150-day SMA) to let multibaggers compound uncapped.
+1. **Dynamic Initial Stop-Loss**: The system discards hardcoded percentages (e.g. 7.5%) and calculates a custom stop-loss based on the stock's actual VCP (standard deviation) score:
+   $$\text{Dynamic SL (\%)} = \text{VCP Score} \times 1.5 \quad (\text{Bounded between 5.0\% and 15.0\%})$$
+   This gives stable stocks a tight stop-loss (avoiding excess drag) and volatile stocks a wider stop-loss (avoiding shakeouts).
+2. **The Swing Exit (50% of position)**: Sell 50% of the shares when the stock hits the timeframe target (e.g. +15.0% for swing). This locks in profits and covers the risk of the whole trade.
+3. **The Multibagger Runner (50% of position)**: The remaining 50% shifts to a trailing stop-loss (exiting only if the daily close drops below the **50-day or 200-day SMA**) to let compounders run uncapped.
+4. **Rupee Risk Equalization (Position Sizer)**: To prevent highly volatile stocks from creating outsized portfolio drawdowns, the position sizer equalizes the rupee risk across all trades:
+   $$\text{Shares to Buy} = \frac{\text{Total Capital} \times \text{Risk \%}}{\text{Entry Price} \times \text{Dynamic SL \%}}$$
+   This ensures that if the trade hits its dynamic stop-loss, you lose exactly the risk amount (e.g. 1.0% of capital) regardless of the stock's volatility profile.
 
 ---
 
@@ -208,4 +213,35 @@ Fetches 15-minute live candles for Nifty 50 from Upstox API. If $\text{Nifty LTP
 
 ### F. ⚡ Upstox 15-Min + 60-Min Live Trigger Scanner & Audio Alert
 Market-hours scanner monitoring *only* the 15 watchlist stocks. Requires `LTP >= Pivot High`, `15-Min Vol >= 1.5x Avg`, and `60-Min Price > 60-Min VWAP`. Fires a **🚨 LIVE BREAKOUT ALERT** with an HTML5 audio chime sound (`🔊`).
+
+---
+
+## 13. Auction Market Theory: Volume Profile POC & PbD Shapes
+
+To isolate institutional accumulation zones and distinguish breakouts from weak structures, the system implements a rolling 30-day Volume Profile calculation using a vectorized histogram:
+
+### A. Point of Control (POC)
+The price level where the absolute maximum trading volume occurred over the last 30 trading days:
+$$\text{POC} = \text{Price Bin midpoint with } \max(\text{Volume})$$
+
+### B. Volume Area Density
+The percentage of total 30-day volume traded within a tight $\pm 3.0\%$ window around the POC:
+$$\text{Volume Area Density (\%)} = \frac{\text{Volume in } [0.97 \times \text{POC}, 1.03 \times \text{POC}]}{\text{Total 30-Day Volume}} \times 100$$
+High density ($\ge 50\%$) signals a significant high-volume accumulation base (Balance Area).
+
+### C. PbD Profile Shape Classification
+We mathematically classify Nill's three core chart profiles by evaluating where the POC sits relative to the 30-day price range:
+* **P-Profile (Accumulation)**: POC is in the upper 35% of the range. Bullish accumulation; standard markup breakouts.
+* **b-Profile (Distribution)**: POC is in the lower 35% of the range. Bearish structure representing post-liquidation consolidation. **Breakouts fail here and are blocked/suppressed in strategy suggested risk metrics.**
+* **D-Profile (Balance)**: POC is in the center. sideways balance; play range boundaries or wait for momentum.
+
+---
+
+## 14. Trend Extension Guardrails (Anti-FOMO)
+
+To prevent entering trades at the peak of a parabolic markup phase (chasing price), the system tracks the distance between the current close and the 50-Day Moving Average:
+$$\text{Extension Ratio} = \frac{\text{Current Close}}{\text{50-Day SMA}}$$
+
+* **Extension Check**: If the Extension Ratio is $> 1.20$ (trading $> 20\%$ above the 50D SMA), the setup is flagged as **`⚠️ Over-Extended`**.
+* **Capital Risk Control**: The position sizer dynamically drops the recommended trade risk parameter to **0.25%** to protect capital from immediate mean-reversion pullbacks.
 

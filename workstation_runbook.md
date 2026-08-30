@@ -73,43 +73,45 @@ To trade this strategy with positive mathematical expectancy, you must follow th
 * **Rule**: **Never buy at yesterday's close price or at the market open.**
 * **Action**: Identify the **Pivot High Price** printed by the tool. Place a **Buy Limit GTT (Good Till Triggered) Order** exactly at that price. This prevents entering consolidations that fail to break out.
 
-### 3. Sizing & Exits (Standard Mode vs. Microcap Mode)
-* **Standard Mode (Midcaps)**:
-  * Initial Stop-Loss: **-7.5%**
-  * Target Profit (50% position): **+15.0%** (2:1 Risk-Reward Ratio)
-* **Microcap Mode (Turnarounds)**:
-  * Initial Stop-Loss: **-15.0%** (wider for microcap volatility)
-  * Target Profit (50% position): **+15.0%**
-* **The Runner (Remaining 50%)**: Once the first half is sold at +15%, move the stop-loss to entry price (breakeven). Exit ONLY when the daily candle closes below the **50-day Moving Average**.
+### 3. Volatility-Adjusted Sizing & Exits
+Instead of using rigid parameters, the system dynamically calculates stop-losses and risk limits:
+* **Dynamic Stop-Loss (Dynamic SL)**: Stop-loss is set dynamically based on the stock's actual VCP (standard deviation) score:
+  $$\text{Dynamic SL (\%)} = \text{VCP Score} \times 1.5 \quad (\text{Bounded between 5.0\% and 15.0\%})$$
+* **Rupee Risk Equalization**: Use the built-in **Position Sizer** in the Detailed Viewer to calculate the exact share count to buy based on your capital and risk target (e.g. 1.0% max risk). If the stop-loss is hit, your rupee loss remains perfectly constant.
+* **PbD Profile Shape Restrictions (P, b, D)**:
+  * **P-Profile (Accumulation)**: POC is in the upper 35% of the range. Bullish setup; standard position sizing.
+  * **b-Profile (Distribution)**: POC is in the lower 35% of the range. Bearish structure; **avoid entry** or scale down risk to a minimum of **0.1%**.
+  * **D-Profile (Neutral Balance)**: POC is in the middle. Sideways range; trade range boundaries.
+* **Trend Extension Warnings (Anti-FOMO)**:
+  * If a stock trades $> 20\%$ above its 50-day SMA, it is flagged as **`⚠️ Over-Extended`**. Reduce sizer risk to **0.25%** and wait for a pullback to the moving average.
+* **The Runner (Remaining 50%)**: Take profit on the first 50% of the position at the timeframe target. Move the stop-loss of the remaining 50% runner to breakeven, exiting only if the daily candle closes below the **50-day or 200-day Moving Average**.
 
 ---
 
-## 4. Time Horizon Configuration Guide (1-Day vs. Swing vs. Long-Term)
+## 4. Time Horizon Discovery Dashboard Guide
 
-The workstation can be configured to target three distinct trading timeframes. Adjust your parameters and execution rules as follows:
+The **⏳ Time Horizon Discovery** dashboard tab automatically filters the scanned universe into three watchlists based on their expected breakout target velocities (using historical analogue matching data):
 
-### 1-Day Holding Period (Intraday Scalping)
-* **Goal**: Capture quick 2% to 4% momentum spikes and close all positions before 3:30 PM IST.
-* **Workstation Configuration**:
-  1. Toggle **Enable Intraday Workstation** `ON` in the Streamlit sidebar.
-  2. Input your **Total Trading Capital** and **Max Risk per Trade** (recommended: 1.0% = ₹5,000 for a ₹5L account).
-  3. Keep the **Nifty Intraday VWAP Kill-Switch** card visible. Do not enter any long trades if Nifty is trading below its daily VWAP (indicated by a red warning).
-* **Execution**: Place orders when the **Live 15-Min Breakout Scanner** alerts you that a stock has crossed its Pivot High on a volume spike. Stop-loss is set tight (1.5% below pivot).
+### ⚡ Intraday Watchlist (1-Day Holding Period)
+* **Expected Velocity**: **1 to 3 days** (quick momentum scalps).
+* **Execution Rules**:
+  * Set a tight **1.5% Stop-Loss** and target a **+3.0% profit target**.
+  * Use the **Intraday Workstation** live scanner to get 15-minute alerts when these trigger above their Pivot High.
+  * Exit 100% of the position before market close (3:30 PM IST) to avoid overnight gap risk.
 
-### 15-to-20-Day Holding Period (Swing Trading - Default Mode)
-* **Goal**: Ride mid-cap breakouts to a clean 15% target.
-* **Workstation Configuration**:
-  1. In the sidebar, set **Select Model Target Scenario** to `🎯 15% (Target Predictor - Default)`.
-  2. Set **Initial Stop-Loss** to `7.5%` and **Swing Target Profit** to `15.0%`.
-* **Execution**: Place pre-market **Buy GTT Limit** orders at the printed **Pivot High** price. Take profit on 50% of the position at +15%, move the remaining 50% stop to breakeven, and exit on Day 20 if targets aren't reached (Time Exit).
+### 🎯 Swing Watchlist (7-to-30-Day Holding Period)
+* **Expected Velocity**: **7 to 30 days** (standard swing cycles).
+* **Execution Rules**:
+  * Buy using GTT Limit orders exactly at the printed **Pivot High** price.
+  * Apply the **Dynamic Stop-Loss** and set a **15.0% swing profit target**.
+  * Take profit on 50% of the position at the target, move the rest to breakeven, and exit on Day 30 if target isn't met.
 
-### Long-Term Holding Period (Months to Years Compounding)
-* **Goal**: Buy high-conviction, high-ROCE compounders right as their multi-year markup begins.
-* **Workstation Configuration**:
-  1. In the sidebar, set **Select Model Target Scenario** to `🚀 50% (Multibagger - Strict / Selective)`. Click *Retrain XGBoost Classifier* to build the selective model.
-  2. Check the **Structural Growth Compounder** tab.
-  3. Turn **Enforce Quality (ROCE/ROE >= 18% & Debt/Equity <= 0.5)** `ON`.
-* **Execution**: Buy breakouts using GTT orders. Take swing profit on 50% of the shares at +30% to cover risk. Hold the remaining 50% runner indefinitely, exiting ONLY when the daily candle closes below the **150-day or 200-day Moving Average** (printed on the chart).
+### 💎 Long-Term Watchlist (30-to-250-Day Holding Period)
+* **Expected Velocity**: **30 to 250 days** (structural trend compounders).
+* **Execution Rules**:
+  * Targets high-quality compounders (ROCE $\ge 18\%$ and Debt-to-Equity $\le 0.5$) breaking out of a multi-month base.
+  * Set a **30.0% swing exit target** on 50% of the shares to lock in returns.
+  * Leave the remaining 50% runner uncapped, exiting only when the daily candle closes below the **50-day or 200-day Moving Average**.
 
 ---
 
