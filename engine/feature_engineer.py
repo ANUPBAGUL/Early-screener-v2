@@ -65,6 +65,7 @@ def calculate_technical_features(df):
     # 6. Volume Profile Node Isolation (Rolling 30-Day Window)
     pocs = []
     densities = []
+    pbd_profiles = []
     
     closes = df['close'].values
     volumes = df['volume'].values
@@ -76,6 +77,7 @@ def calculate_technical_features(df):
         if i < 30:
             pocs.append(np.nan)
             densities.append(np.nan)
+            pbd_profiles.append(None)
             continue
             
         c_slice = closes[i-29:i+1]
@@ -89,6 +91,7 @@ def calculate_technical_features(df):
         if max_p == min_p:
             pocs.append(min_p)
             densities.append(100.0)
+            pbd_profiles.append('D')
             continue
             
         bins = np.linspace(min_p, max_p, 11)
@@ -107,8 +110,18 @@ def calculate_technical_features(df):
         pocs.append(round(float(poc_price), 2))
         densities.append(round(float(density), 1))
         
+        # Calculate Profile Position Ratio for PbD classification
+        ratio = (poc_price - min_p) / (max_p - min_p)
+        if ratio >= 0.65:
+            pbd_profiles.append('P')
+        elif ratio <= 0.35:
+            pbd_profiles.append('b')
+        else:
+            pbd_profiles.append('D')
+        
     df['volume_node_poc'] = pocs
     df['volume_node_density'] = densities
+    df['pbd_profile'] = pbd_profiles
     
     return df
 
@@ -129,7 +142,7 @@ def run_feature_engineering():
     from datetime import datetime
     to_date = datetime.today().strftime('%Y-%m-%d')
     
-    # Schema migration: add pivot_high, volume_node_poc, and volume_node_density if they don't exist
+    # Schema migration: add pivot_high, volume_node_poc, volume_node_density, and pbd_profile if they don't exist
     try:
         cursor.execute("ALTER TABLE technical_features ADD COLUMN pivot_high REAL")
         conn.commit()
@@ -138,10 +151,21 @@ def run_feature_engineering():
         
     try:
         cursor.execute("ALTER TABLE technical_features ADD COLUMN volume_node_poc REAL")
+        conn.commit()
+    except Exception:
+        pass
+        
+    try:
         cursor.execute("ALTER TABLE technical_features ADD COLUMN volume_node_density REAL")
         conn.commit()
     except Exception:
-        pass  # Columns already exist
+        pass
+        
+    try:
+        cursor.execute("ALTER TABLE technical_features ADD COLUMN pbd_profile TEXT")
+        conn.commit()
+    except Exception:
+        pass
     
     for inst in instruments:
         # Delete today's recorded features first to prevent incomplete intraday calculation poisoning
@@ -191,7 +215,8 @@ def run_feature_engineering():
                 row['stage_2_flag'],
                 row.get('pivot_high'),
                 row.get('volume_node_poc'),
-                row.get('volume_node_density')
+                row.get('volume_node_density'),
+                row.get('pbd_profile')
             )
             for _, row in df.iterrows()
         ]
@@ -200,8 +225,8 @@ def run_feature_engineering():
         cursor.executemany("""
             INSERT OR REPLACE INTO technical_features 
             (instrument_key, timestamp, volatility_contraction_score, volume_surge_score, momentum_score,
-             sma_50, sma_150, sma_200, high_52w, stage_2_flag, pivot_high, volume_node_poc, volume_node_density)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             sma_50, sma_150, sma_200, high_52w, stage_2_flag, pivot_high, volume_node_poc, volume_node_density, pbd_profile)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, insert_data)
         
         total_inserted += len(insert_data)

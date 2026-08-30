@@ -535,6 +535,10 @@ if st.session_state.get('run_screener', False):
                     sl = row.get('dynamic_sl', 7.5)
                     vcp = row.get('volatility_contraction_score', 5.0)
                     mcap = row.get('market_cap', 1000.0)
+                    pbd = row.get('pbd_profile')
+                    
+                    if pbd == 'b':
+                        return f"⚠️ Bearish b-Profile | Distribution Area | Avoid Breakouts"
                     
                     if sma50 > 0.0 and (close / sma50) > 1.20:
                         return f"⚠️ Over-Extended | Risk 0.25% | SL {sl}% | Wait for Pullback"
@@ -1314,9 +1318,14 @@ if st.session_state.get('run_screener', False):
                             is_extended = True
                             st.error(f"⚠️ **OVER-EXTENDED WARNING**: This stock is trading {(current_price/sma_50_val - 1.0)*100:.1f}% above its 50-day moving average. Buying breakouts here carries extreme pullback risk. We strongly recommend reducing your risk sizing.")
                         
+                        pbd_shape = record.get('pbd_profile')
+                        
+                        if pbd_shape == 'b':
+                            st.error("🚨 **BEARISH DISTRIBUTION STRUCTURE**: This stock exhibits a **b-Profile** shape, meaning the majority of its volume occurred at the bottom of its range after a drop. Buying breakouts here has a very low historical success rate. Sizing down to a minimum (0.1% risk) is recommended.")
+                        
                         if poc_price is not None and density_val is not None:
                             st.markdown("### 📊 Auction Market Volume Profile (30-Day)")
-                            col_vp1, col_vp2, col_vp3 = st.columns(3)
+                            col_vp1, col_vp2, col_vp3, col_vp4 = st.columns(4)
                             with col_vp1:
                                 st.metric("Point of Control (POC)", f"Rs. {poc_price:.2f}", help="The price level where the maximum volume occurred over the last 30 trading days.")
                             with col_vp2:
@@ -1325,9 +1334,17 @@ if st.session_state.get('run_screener', False):
                             with col_vp3:
                                 dist_from_poc = ((current_price - poc_price) / poc_price) * 100
                                 if dist_from_poc > 15.0:
-                                    st.metric("Dist. to Accumulation Base", f"+{dist_from_poc:.1f}%", "Chase Risk (High)", delta_color="inverse")
+                                    st.metric("Dist. to Base", f"+{dist_from_poc:.1f}%", "Chase Risk (High)", delta_color="inverse")
                                 else:
-                                    st.metric("Dist. to Accumulation Base", f"+{dist_from_poc:.1f}%", "Within Safe Base (Low)")
+                                    st.metric("Dist. to Base", f"+{dist_from_poc:.1f}%", "Within Base (Low)")
+                            with col_vp4:
+                                if pbd_shape == 'P':
+                                    shape_desc = "Accumulation (Bull)"
+                                elif pbd_shape == 'b':
+                                    shape_desc = "Distribution (Bear)"
+                                else:
+                                    shape_desc = "Balance (Neutral)"
+                                st.metric("PbD Profile Shape", f"{pbd_shape}-Profile", shape_desc)
                         
                         # Volatility-Adjusted Position Sizer
                         st.markdown("### 🧮 Volatility-Adjusted Position Sizer")
@@ -1335,8 +1352,8 @@ if st.session_state.get('run_screener', False):
                         with col_sz1:
                             total_cap = st.number_input("Total Trading Capital (Rs.)", min_value=10000.0, value=500000.0, step=10000.0, key="sizer_cap")
                         with col_sz2:
-                            # Dynamic capital risk scaling based on extensions/microcaps
-                            default_risk = 0.25 if is_extended else (0.5 if record.get('market_cap', 1000.0) < 1500.0 else 1.0)
+                            # Dynamic capital risk scaling based on extensions/microcaps/bearish profiles
+                            default_risk = 0.1 if pbd_shape == 'b' else (0.25 if is_extended else (0.5 if record.get('market_cap', 1000.0) < 1500.0 else 1.0))
                             risk_pct = st.slider("Max Capital Risk per Trade (%)", min_value=0.1, max_value=5.0, value=default_risk, step=0.1, key="sizer_risk")
                         with col_sz3:
                             rupee_risk = total_cap * (risk_pct / 100.0)
