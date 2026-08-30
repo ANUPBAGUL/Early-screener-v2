@@ -269,11 +269,22 @@ with st.sidebar:
         config.BREAKOUT_LABEL_THRESHOLD = new_thresh
         st.warning(f"⚠️ Target mode changed to {selected_mode}. Click 'Retrain XGBoost Classifier' below to retrain model & update DNA library!")
 
+    holding_period = st.slider(
+        "Strategy Holding Period (Trading Days):",
+        min_value=5, max_value=60,
+        value=int(getattr(config, 'HOLDING_PERIOD', 20)),
+        step=1,
+        help="Configure the holding window for model training labels and backtesting exit criteria."
+    )
+    if holding_period != config.HOLDING_PERIOD:
+        config.HOLDING_PERIOD = holding_period
+        st.warning(f"⚠️ Strategy holding period changed to {holding_period} days. Click 'Retrain XGBoost Classifier' below to retrain the model and build the DNA library!")
+
     # Informative UI Callout Card
     st.markdown(
         f"""
         <div style="background-color: #1e293b; padding: 12px; border-radius: 8px; border-left: 4px solid #3b82f6; margin-bottom: 12px;">
-            <p style="margin: 0; font-size: 0.85rem; color: #94a3b8;"><b>Active Mode:</b> <span style="color: #60a5fa;"><b>≥+{int(new_thresh * 100)}% Close-to-Close Return (20 Days)</b></span></p>
+            <p style="margin: 0; font-size: 0.85rem; color: #94a3b8;"><b>Active Mode:</b> <span style="color: #60a5fa;"><b>≥+{int(new_thresh * 100)}% Close-to-Close Return ({config.HOLDING_PERIOD} Days)</b></span></p>
         </div>
         """,
         unsafe_allow_html=True

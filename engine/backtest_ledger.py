@@ -209,9 +209,9 @@ def run_backtest_ledger(confluence_threshold=85.0, stop_loss_pct=7.5, target_pro
                 idx = setup_indices[0]
                 setup_close = series.iloc[idx]['close']
                 trade_info["Setup Close"] = setup_close
-                
-                # Slices subsequent 20 trading days (excluding the setup day itself)
-                future_slice = series.iloc[idx+1:idx+21]
+                holding_period = int(getattr(config, 'HOLDING_PERIOD', 20))
+                # Slices subsequent trading days (excluding the setup day itself)
+                future_slice = series.iloc[idx+1:idx+holding_period+1]
                 
                 if not future_slice.empty:
                     stop_loss_price = setup_close * (1.0 - stop_loss_pct / 100.0)
@@ -223,7 +223,7 @@ def run_backtest_ledger(confluence_threshold=85.0, stop_loss_pct=7.5, target_pro
                     
                     # Chronological simulation to handle Drawdown Blindspot
                     days_to_exit = None
-                    if len(future_slice) == 20:
+                    if len(future_slice) == holding_period:
                         for day_idx, (_, day_row) in enumerate(future_slice.iterrows()):
                             # Check stop loss first (pessimistic)
                             if day_row['low'] <= stop_loss_price:
@@ -239,13 +239,12 @@ def run_backtest_ledger(confluence_threshold=85.0, stop_loss_pct=7.5, target_pro
                                 days_to_exit = day_idx + 1
                                 break
                         else:
-                            # Ended 20 days without hitting either target or stop.
-                            # This is a TIME_EXIT — not a decisive SUCCESS or FAILURE.
-                            # Classifying a +0.1% 20-day drift as "SUCCESS" inflates win-rate.
+                            # Ended without hitting either target or stop.
+                            # This is a TIME_EXIT.
                             exit_price = future_slice.iloc[-1]['close']
                             ret_val = ((exit_price - setup_close) / setup_close) * 100
                             status = "TIME_EXIT"
-                            days_to_exit = 20
+                            days_to_exit = holding_period
                     else:
                         # In-flight/Active trade: check if already hit SL or target
                         for day_idx, (_, day_row) in enumerate(future_slice.iterrows()):

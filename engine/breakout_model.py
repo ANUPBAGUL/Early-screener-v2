@@ -64,8 +64,9 @@ def prepare_data():
         subsequent_returns = np.zeros(n, dtype=float)
         days_to_target = np.zeros(n, dtype=int)
         
+        holding_period = int(getattr(config, 'HOLDING_PERIOD', 20))
         for i in range(n):
-            if i + 20 >= n:
+            if i + holding_period >= n:
                 labels[i] = 0
                 subsequent_returns[i] = 0.0
                 days_to_target[i] = 0
@@ -75,8 +76,8 @@ def prepare_data():
             sl_price = close_val * (1.0 - 0.075)
             tp_price = close_val * (1.0 + config.BREAKOUT_LABEL_THRESHOLD)
             
-            # Check subsequent 20 trading days path
-            for j in range(i + 1, i + 21):
+            # Check subsequent path
+            for j in range(i + 1, i + holding_period + 1):
                 day_low = low_arr[j]
                 day_high = high_arr[j]
                 
@@ -92,12 +93,12 @@ def prepare_data():
                     days_to_target[i] = j - i
                     break
             else:
-                # Time exit on day 20 close
-                day_20_close = close_arr[i + 20]
-                ret_val = (day_20_close - close_val) / close_val
+                # Time exit on day close
+                day_close = close_arr[i + holding_period]
+                ret_val = (day_close - close_val) / close_val
                 subsequent_returns[i] = ret_val
                 labels[i] = 1 if ret_val >= config.BREAKOUT_LABEL_THRESHOLD else 0
-                days_to_target[i] = 20
+                days_to_target[i] = holding_period
                 
         group['label'] = labels
         group['subsequent_return'] = subsequent_returns

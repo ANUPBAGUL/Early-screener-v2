@@ -65,6 +65,10 @@ ARCHETYPES = {
 # 0.50 = multibagger screener (rare signals, very conservative — requires large historical dataset)
 BREAKOUT_LABEL_THRESHOLD = 0.15
 
+# Strategy holding period (in trading days) — controls training and backtest window.
+# Default: 20 trading days (approx. 1 calendar month).
+HOLDING_PERIOD = 20
+
 # Per-archetype Confluence Score weights.
 # Momentum/technical paths: XGBoost signal dominates (breakout probability is the edge).
 # Value/fundamental paths: F-Score dominates (fundamental inflection precedes chart momentum).
