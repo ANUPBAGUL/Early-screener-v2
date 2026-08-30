@@ -699,6 +699,7 @@ if st.session_state.get('run_screener', False):
                         if idx < len(display_df):
                             selected_sym = display_df.iloc[idx]['Symbol']
                             st.session_state['selected_stock_view'] = selected_sym
+                            st.session_state['selected_stock_selectbox'] = selected_sym
                             st.session_state['selected_stock_context'] = tab_name.lower()
                             st.rerun()
                 
@@ -930,6 +931,7 @@ if st.session_state.get('run_screener', False):
                                 if idx < len(display_intra):
                                     selected_sym = display_intra.iloc[idx]['Symbol']
                                     st.session_state['selected_stock_view'] = selected_sym
+                                    st.session_state['selected_stock_selectbox'] = selected_sym
                                     st.session_state['selected_stock_context'] = 'intraday'
                                     st.rerun()
                                     
@@ -969,6 +971,7 @@ if st.session_state.get('run_screener', False):
                                 if idx < len(display_swing):
                                     selected_sym = display_swing.iloc[idx]['Symbol']
                                     st.session_state['selected_stock_view'] = selected_sym
+                                    st.session_state['selected_stock_selectbox'] = selected_sym
                                     st.session_state['selected_stock_context'] = 'swing'
                                     st.rerun()
                         else:
@@ -1010,6 +1013,7 @@ if st.session_state.get('run_screener', False):
                                 if idx < len(display_long):
                                     selected_sym = display_long.iloc[idx]['Symbol']
                                     st.session_state['selected_stock_view'] = selected_sym
+                                    st.session_state['selected_stock_selectbox'] = selected_sym
                                     st.session_state['selected_stock_context'] = 'long_term'
                                     st.rerun()
                                     
@@ -1245,11 +1249,6 @@ if st.session_state.get('run_screener', False):
         else:
             st.warning("⚠️ No stocks matched search filters across any of the archetype tabs. Try loosening parameters.")
         
-        st.write(f"DEBUG: selected_stock = {selected_stock}")
-        st.write(f"DEBUG: matched_records in session_state = {'matched_records' in st.session_state}")
-        if 'matched_records' in st.session_state:
-            st.write(f"DEBUG: keys in matched_records = {list(st.session_state['matched_records'].keys())}")
-        st.write(f"DEBUG: scored_df in session_state = {'scored_df' in st.session_state}")
 
         if selected_stock:
             try:
