@@ -523,6 +523,28 @@ if st.session_state.get('run_screener', False):
                         (scored_df['operating_cash_flow'] > 0.0)
                     ].copy()
                     
+                # 3. Compute Volatility-Adjusted Strategy Columns
+                scored_df['dynamic_sl'] = (scored_df['volatility_contraction_score'] * 1.5).clip(5.0, 15.0).round(1)
+                scored_df['tentative_days'] = scored_df['match_days'].apply(
+                    lambda x: f"{int(x)} Days" if pd.notna(x) and x > 0 else f"{config.HOLDING_PERIOD} Days"
+                )
+                
+                def get_strategy_suggestion(row):
+                    mcap = row.get('market_cap', 1000.0)
+                    vcp = row.get('volatility_contraction_score', 5.0)
+                    sl = row.get('dynamic_sl', 7.5)
+                    
+                    if mcap < 1500.0:
+                        return f"⚠️ Microcap Vol | Risk 0.5% | SL {sl}% | Governance OK"
+                    elif vcp <= 4.0:
+                        return f"🟢 Low Risk VCP | Risk 1.0% | SL {sl}% | GTT Buy | Trail 50D"
+                    elif vcp > 7.0:
+                        return f"🟡 Wide Base | Risk 0.75% | SL {sl}% | Buy Pullback"
+                    else:
+                        return f"🔵 Std Swing | Risk 1.0% | SL {sl}% | TP 15% GTT"
+                        
+                scored_df['risk_review'] = scored_df.apply(get_strategy_suggestion, axis=1)
+
                 # E. Apply standard user sliders (Volume Surge, VCP, Similarity) for the Momentum Engine
                 tech_filtered_df = scored_df[
                     (scored_df['volume_surge_score'] >= vol_surge) & 
@@ -645,7 +667,15 @@ if st.session_state.get('run_screener', False):
                     if low_q > 0:
                         st.caption(f"ℹ️ {low_q} stock(s) in this view have partial or no fundamental data (🟥/⬛). F-Score for these may be unreliable.")
                     
-                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    grid_key = f"grid_{tab_name.replace(' ', '_').lower()}"
+                    event = st.dataframe(display_df, use_container_width=True, hide_index=True, on_select="rerun", key=grid_key, selection_mode="single-row")
+                    if event and event.selection and event.selection.rows:
+                        idx = event.selection.rows[0]
+                        if idx < len(display_df):
+                            selected_sym = display_df.iloc[idx]['Symbol']
+                            st.session_state['selected_stock_view'] = selected_sym
+                            st.session_state['selected_stock_context'] = tab_name.lower()
+                            st.rerun()
                 
                 # Render Sector Co-Breakout Clustering Alerts
                 clustered_sectors = scored_df[
@@ -846,67 +876,118 @@ if st.session_state.get('run_screener', False):
                         st.subheader("⚡ Intraday Watchlist (1-Day)")
                         st.caption("Target quick 2% to 4% momentum moves. Exit before market close.")
                         
-                        # Filter for high probability breakout candidates
+                        # Filter for high probability breakout candidates with fast analogue reaction (1-3 days)
                         intra_candidates = scored_df[
                             (scored_df['market_cap'] >= mcap_min) &
                             (scored_df['market_cap'] <= mcap_max) &
-                            (scored_df['stage_2_flag'] == 1)
+                            (scored_df['stage_2_flag'] == 1) &
+                            (scored_df['match_days'] <= 3)
                         ].sort_values(by='breakout_prob', ascending=False).head(5).copy()
                         
                         if not intra_candidates.empty:
-                            display_intra = intra_candidates[['symbol', 'pivot_high', 'breakout_prob', 'f_score']].copy()
+                            # Populate global symbols
+                            for _, r in intra_candidates.iterrows():
+                                all_flagged_symbols.add(r['symbol'])
+                                global_matched_records[r['symbol']] = r.to_dict()
+                                
+                            display_intra = intra_candidates[['symbol', 'pivot_high', 'close', 'dynamic_sl', 'risk_review']].copy()
+                            display_intra['Trigger Dist (%)'] = ((display_intra['pivot_high'] - display_intra['close']) / display_intra['close'] * 100).round(1).clip(lower=0.0)
                             display_intra['pivot_high'] = display_intra['pivot_high'].round(2)
+                            display_intra = display_intra[['symbol', 'pivot_high', 'Trigger Dist (%)', 'dynamic_sl', 'risk_review']]
                             display_intra = display_intra.rename(columns={
                                 'symbol': 'Symbol', 'pivot_high': '🎯 Buy GTT (₹)',
-                                'breakout_prob': 'Prob (%)', 'f_score': 'F-Score'
+                                'dynamic_sl': 'SL (%)', 'risk_review': 'Risk & Strategy Suggestion'
                             })
-                            st.dataframe(display_intra, use_container_width=True, hide_index=True)
+                            
+                            event_intra = st.dataframe(display_intra, use_container_width=True, hide_index=True, on_select="rerun", key="grid_intra", selection_mode="single-row")
+                            if event_intra and event_intra.selection and event_intra.selection.rows:
+                                idx = event_intra.selection.rows[0]
+                                if idx < len(display_intra):
+                                    selected_sym = display_intra.iloc[idx]['Symbol']
+                                    st.session_state['selected_stock_view'] = selected_sym
+                                    st.session_state['selected_stock_context'] = 'intraday'
+                                    st.rerun()
+                                    
                             st.info("💡 **Execution**: Enable the *Intraday Workstation* toggle below to receive live 15-min alerts when these trigger.")
                         else:
                             st.info("No intraday candidates found.")
                             
                     with col_h2:
-                        st.subheader("🎯 Swing Watchlist (20-Days)")
+                        st.subheader("🎯 Swing Watchlist (7-30 Days)")
                         st.caption("Target a +15% swing return on VCP breakout setups.")
                         
+                        # Filter for swing candidates with medium-velocity breakout paths (7-30 days)
                         swing_candidates = tech_filtered_df[
                             (tech_filtered_df['market_cap'] >= mcap_min) &
-                            (tech_filtered_df['market_cap'] <= mcap_max)
+                            (tech_filtered_df['market_cap'] <= mcap_max) &
+                            (tech_filtered_df['match_days'] >= 7) &
+                            (tech_filtered_df['match_days'] <= 30)
                         ].sort_values(by='confluence_score', ascending=False).head(5).copy()
                         
                         if not swing_candidates.empty:
-                            display_swing = swing_candidates[['symbol', 'pivot_high', 'confluence_score', 'match_symbol', 'match_days']].copy()
+                            # Populate global symbols
+                            for _, r in swing_candidates.iterrows():
+                                all_flagged_symbols.add(r['symbol'])
+                                global_matched_records[r['symbol']] = r.to_dict()
+                                
+                            display_swing = swing_candidates[['symbol', 'pivot_high', 'confluence_score', 'dynamic_sl', 'tentative_days', 'risk_review']].copy()
                             display_swing['pivot_high'] = display_swing['pivot_high'].round(2)
                             display_swing = display_swing.rename(columns={
                                 'symbol': 'Symbol', 'pivot_high': '🎯 Buy GTT (₹)',
-                                'confluence_score': 'Confluence (%)', 'match_symbol': 'Match',
-                                'match_days': 'Days to TP'
+                                'confluence_score': 'Confluence (%)', 'dynamic_sl': 'SL (%)',
+                                'tentative_days': 'Tentative Days', 'risk_review': 'Risk & Strategy Suggestion'
                             })
-                            st.dataframe(display_swing, use_container_width=True, hide_index=True)
+                            
+                            event_swing = st.dataframe(display_swing, use_container_width=True, hide_index=True, on_select="rerun", key="grid_swing", selection_mode="single-row")
+                            if event_swing and event_swing.selection and event_swing.selection.rows:
+                                idx = event_swing.selection.rows[0]
+                                if idx < len(display_swing):
+                                    selected_sym = display_swing.iloc[idx]['Symbol']
+                                    st.session_state['selected_stock_view'] = selected_sym
+                                    st.session_state['selected_stock_context'] = 'swing'
+                                    st.rerun()
                         else:
                             st.info("No swing candidates found.")
                             
                     with col_h3:
-                        st.subheader("💎 Long-Term Watch (Months/Years)")
+                        st.subheader("💎 Long-Term Watch (30-250 Days)")
                         st.caption("Hold elite compounders; exit only below major trendlines.")
                         
+                        # Filter for long-term compounders with structural trends (30-250 days)
                         long_candidates = scored_df[
                             (scored_df['market_cap'] >= mcap_min) &
                             (scored_df['market_cap'] <= mcap_max) &
                             (scored_df['roce'] >= 0.18) &
                             (scored_df['debt_to_equity'] <= 0.5) &
-                            (scored_df['stage_2_flag'] == 1)
+                            (scored_df['stage_2_flag'] == 1) &
+                            (scored_df['match_days'] >= 30) &
+                            (scored_df['match_days'] <= 250)
                         ].sort_values(by='confluence_score', ascending=False).head(5).copy()
                         
                         if not long_candidates.empty:
-                            display_long = long_candidates[['symbol', 'f_score', 'sma_50', 'sma_200']].copy()
-                            display_long['sma_50'] = display_long['sma_50'].round(1)
-                            display_long['sma_200'] = display_long['sma_200'].round(1)
+                            # Populate global symbols
+                            for _, r in long_candidates.iterrows():
+                                all_flagged_symbols.add(r['symbol'])
+                                global_matched_records[r['symbol']] = r.to_dict()
+                                
+                            display_long = long_candidates[['symbol', 'roce', 'debt_to_equity', 'dynamic_sl', 'risk_review']].copy()
+                            display_long['roce'] = (display_long['roce'] * 100).round(1).astype(str) + "%"
+                            display_long['debt_to_equity'] = display_long['debt_to_equity'].round(2)
                             display_long = display_long.rename(columns={
-                                'symbol': 'Symbol', 'f_score': 'F-Score',
-                                'sma_50': '50D SMA (₹)', 'sma_200': '200D SMA (₹)'
+                                'symbol': 'Symbol', 'roce': 'ROCE (%)',
+                                'debt_to_equity': 'Debt-to-Equity', 'dynamic_sl': 'SL (%)',
+                                'risk_review': 'Risk & Strategy Suggestion'
                             })
-                            st.dataframe(display_long, use_container_width=True, hide_index=True)
+                            
+                            event_long = st.dataframe(display_long, use_container_width=True, hide_index=True, on_select="rerun", key="grid_long", selection_mode="single-row")
+                            if event_long and event_long.selection and event_long.selection.rows:
+                                idx = event_long.selection.rows[0]
+                                if idx < len(display_long):
+                                    selected_sym = display_long.iloc[idx]['Symbol']
+                                    st.session_state['selected_stock_view'] = selected_sym
+                                    st.session_state['selected_stock_context'] = 'long_term'
+                                    st.rerun()
+                                    
                             st.info("💡 **Exit Rule**: Exit if the daily close drops below the 50D SMA or 200D SMA.")
                         else:
                             st.info("No long-term compounders found.")
@@ -1164,47 +1245,75 @@ if st.session_state.get('run_screener', False):
                         # Fetch current price for risk metrics
                         current_price = chart_df.iloc[-1]['close']
                         
-                        # Dynamically calculated stop loss and profit targets based on sidebar selections
-                        stop_loss_mult = 1.0 - (stop_loss_pct / 100.0)
-                        target_mult = 1.0 + (target_profit_pct / 100.0)
-                        
-                        stop_loss_price = current_price * stop_loss_mult
-                        target_price = current_price * target_mult
+                        # Dynamically calculated stop loss and profit targets based on context
+                        context = st.session_state.get('selected_stock_context', 'swing')
                         
                         sma_50_raw = record.get('sma_50')
                         sma_50_val = sma_50_raw if not pd.isna(sma_50_raw) else 0.0
                         sma_150_raw = record.get('sma_150')
                         sma_150_val = sma_150_raw if not pd.isna(sma_150_raw) else 0.0
+                        sma_200_raw = record.get('sma_200')
+                        sma_200_val = sma_200_raw if not pd.isna(sma_200_raw) else 0.0
                         
                         # Chart 2: Analogue (Historical match)
                         analogue_df = fetch_analogue_data(match_sym, match_dt)
                         
+                        if context == 'intraday':
+                            current_sl = 1.5
+                            current_tp = 3.0
+                            context_title = "⚡ Intraday Scalping Workspace"
+                            context_advice = f"⚡ **Intraday Strategy**: Target quick +3.0% scalp (**Rs. {current_price * 1.03:.2f}**) with a tight 1.5% Stop Loss (**Rs. {current_price * 0.985:.2f}**). Sell 100% of your position before market close (3:30 PM IST)."
+                            st.info(context_advice)
+                        elif context == 'long_term':
+                            current_sl = record.get('dynamic_sl', 15.0)
+                            current_tp = 30.0
+                            context_title = "💎 Long-Term Wealth Compounder Workspace"
+                            context_advice = f"💎 **Long-Term Strategy**: Buy breakouts. Target +30.0% swing exit (**Rs. {current_price * 1.30:.2f}**) on 50% of the shares. Hold the remaining 50% runner indefinitely, trailing exits below the 50D SMA (**Rs. {sma_50_val:.1f}**) or 200D SMA (**Rs. {sma_200_val:.1f}**)."
+                            st.success(context_advice)
+                        else:
+                            current_sl = record.get('dynamic_sl', stop_loss_pct)
+                            current_tp = target_profit_pct
+                            context_title = "🎯 Swing Breakout Workspace"
+                            context_advice = f"🎯 **Swing Strategy**: Target +{current_tp}% (**Rs. {current_price * (1.0 + current_tp/100.0):.2f}**) with a volatility-adjusted SL of {current_sl}% (**Rs. {current_price * (1.0 - current_sl/100.0):.2f}**). Lock in profits on 50% of the shares, and trail the rest."
+                            st.warning(context_advice)
+                            
+                        stop_loss_mult = 1.0 - (current_sl / 100.0)
+                        target_mult = 1.0 + (current_tp / 100.0)
+                        
+                        stop_loss_price = current_price * stop_loss_mult
+                        target_price = current_price * target_mult
+                        
                         # Show risk management box
-                        st.markdown("### 🛡️ Hybrid Breakout Risk Management (Dual-Allocation)")
+                        st.markdown(f"### 🛡️ {context_title}")
                         col_r1, col_r2, col_r3, col_r4 = st.columns(4)
                         with col_r1:
                             st.metric("Pivot Entry Price", f"Rs. {current_price:.2f}")
                         with col_r2:
-                            st.metric(f"Strict Initial Stop ({stop_loss_pct}%)", f"Rs. {stop_loss_price:.2f}", f"-{stop_loss_pct}%", delta_color="inverse")
+                            st.metric(f"Dynamic Initial Stop ({current_sl}%)", f"Rs. {stop_loss_price:.2f}", f"-{current_sl}%", delta_color="inverse")
                         with col_r3:
-                            st.metric(f"Swing Exit ({target_profit_pct}%)", f"Rs. {target_price:.2f}", f"+{target_profit_pct}%")
+                            st.metric(f"Timeframe Target ({current_tp}%)", f"Rs. {target_price:.2f}", f"+{current_tp}%")
                         with col_r4:
                             st.metric(
-                                "Runner Stop (50D / 150D)", 
-                                f"Rs. {sma_50_val:.1f} / {sma_150_val:.1f}", 
+                                "Runner Stop (50D / 200D)", 
+                                f"Rs. {sma_50_val:.1f} / {sma_200_val:.1f}", 
                                 "UNCAPPED Target", 
-                                help="Book profit on 50% of the position at the swing target. Leave the remaining 50% uncapped as a runner, exiting only if the daily close falls below the 50-day or 150-day SMA."
+                                help="Book profit on 50% of the position at the swing target. Leave the remaining 50% uncapped as a runner, trailing the 50D or 200D SMA close."
                             )
                         
-                        # Compute dynamic risk-reward ratio
-                        rr_ratio = target_profit_pct / stop_loss_pct
-                        
-                        st.markdown(f"""
-                        > 💡 **Dual-Allocation Execution Plan**:
-                        > * **Strict Initial Stop ({stop_loss_pct}%)**: Place a stop loss at **Rs. {stop_loss_price:.2f}**. If the breakout fails, exit the entire position immediately.
-                        > * **Swing Target (50% of position)**: Sell exactly half your shares at a **+{target_profit_pct}% gain** (**Rs. {target_price:.2f}**). This locks in a 1:{rr_ratio:.1f} risk-reward ratio and covers the risk of the whole trade.
-                        > * **Multibagger Runner (50% of position)**: Keep the remaining half of your position uncapped to ride a major rally. Exit ONLY if the daily price closes below the **50-day SMA** (**Rs. {sma_50_val:.1f}**) or **150-day SMA** (**Rs. {sma_150_val:.1f}**).
-                        """)
+                        # Volatility-Adjusted Position Sizer
+                        st.markdown("### 🧮 Volatility-Adjusted Position Sizer")
+                        col_sz1, col_sz2, col_sz3 = st.columns(3)
+                        with col_sz1:
+                            total_cap = st.number_input("Total Trading Capital (Rs.)", min_value=10000.0, value=500000.0, step=10000.0, key="sizer_cap")
+                        with col_sz2:
+                            risk_pct = st.slider("Max Capital Risk per Trade (%)", min_value=0.1, max_value=5.0, value=1.0, step=0.1, key="sizer_risk")
+                        with col_sz3:
+                            rupee_risk = total_cap * (risk_pct / 100.0)
+                            price_diff = current_price * (current_sl / 100.0)
+                            shares_to_buy = int(rupee_risk / price_diff) if price_diff > 0 else 0
+                            st.metric("Suggested Shares to Buy", f"{shares_to_buy:,} Shares", f"Risk: Rs. {rupee_risk:,.0f} ({risk_pct}%)")
+                            
+                        st.markdown(f"**Position Capital Required**: Rs. {shares_to_buy * current_price:,.2f} | **Worst Case Loss**: Rs. {shares_to_buy * price_diff:,.2f}")
                             
                         col1, col2 = st.columns(2)
                         
