@@ -1245,6 +1245,12 @@ if st.session_state.get('run_screener', False):
         else:
             st.warning("⚠️ No stocks matched search filters across any of the archetype tabs. Try loosening parameters.")
         
+        st.write(f"DEBUG: selected_stock = {selected_stock}")
+        st.write(f"DEBUG: matched_records in session_state = {'matched_records' in st.session_state}")
+        if 'matched_records' in st.session_state:
+            st.write(f"DEBUG: keys in matched_records = {list(st.session_state['matched_records'].keys())}")
+        st.write(f"DEBUG: scored_df in session_state = {'scored_df' in st.session_state}")
+
         if selected_stock:
             try:
                 record = None
