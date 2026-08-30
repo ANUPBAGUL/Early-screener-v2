@@ -1264,7 +1264,7 @@ if st.session_state.get('run_screener', False):
                             context_title = "⚡ Intraday Scalping Workspace"
                             context_advice = f"⚡ **Intraday Strategy**: Target quick +3.0% scalp (**Rs. {current_price * 1.03:.2f}**) with a tight 1.5% Stop Loss (**Rs. {current_price * 0.985:.2f}**). Sell 100% of your position before market close (3:30 PM IST)."
                             st.info(context_advice)
-                        elif context == 'long_term':
+                        elif context in ['long_term', 'structural growth compounder', 'structural growth compounder ']:
                             current_sl = record.get('dynamic_sl', 15.0)
                             current_tp = 30.0
                             context_title = "💎 Long-Term Wealth Compounder Workspace"
