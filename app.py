@@ -134,6 +134,15 @@ def check_market_regime():
         print(f"Error checking Nifty monthly EMA: {e}")
         return None
 
+@st.cache_data(ttl=3600)  # Cache news feed for 1 hour to prevent HTTP blocking on user clicks
+def fetch_stock_news(symbol):
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(f"{symbol}.NS")
+        return ticker.news
+    except Exception:
+        return []
+
 def fetch_analogue_data(symbol, match_date):
     """
     Fetches price history for the historical match and slices it around the breakout date.
@@ -1194,9 +1203,7 @@ if st.session_state.get('run_screener', False):
             # Catalyst & News Intelligence Expander
             with st.expander("🗞️ Catalyst & News Intelligence (Live Feed)"):
                 try:
-                    ticker_sym = f"{selected_stock}.NS"
-                    ticker = yf.Ticker(ticker_sym)
-                    news_list = ticker.news
+                    news_list = fetch_stock_news(selected_stock)
                     
                     if news_list:
                         for item in news_list[:4]:  # Show top 4 articles
