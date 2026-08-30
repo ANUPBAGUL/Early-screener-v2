@@ -53,10 +53,12 @@ def fetch_latest_features():
            s.promoter_holding, s.operating_cash_flow,
            t.volatility_contraction_score, t.volume_surge_score, t.momentum_score,
            t.sma_50, t.sma_150, t.sma_200, t.high_52w, t.stage_2_flag, t.pivot_high,
-           t.volume_node_poc, t.volume_node_density
+           t.volume_node_poc, t.volume_node_density,
+           p.close
     FROM technical_features t
     JOIN stocks s ON t.instrument_key = s.instrument_key
     JOIN avg_vol_50 v ON t.instrument_key = v.instrument_key
+    JOIN price_history p ON t.instrument_key = p.instrument_key AND t.timestamp = p.timestamp
     WHERE (t.instrument_key, t.timestamp) IN (
         SELECT instrument_key, MAX(timestamp) 
         FROM technical_features 
