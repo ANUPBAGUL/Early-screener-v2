@@ -698,10 +698,11 @@ if st.session_state.get('run_screener', False):
                         idx = event.selection.rows[0]
                         if idx < len(display_df):
                             selected_sym = display_df.iloc[idx]['Symbol']
-                            st.session_state['selected_stock_view'] = selected_sym
-                            st.session_state['selected_stock_selectbox'] = selected_sym
-                            st.session_state['selected_stock_context'] = tab_name.lower()
-                            st.rerun()
+                            if selected_sym != st.session_state.get('selected_stock_view'):
+                                st.session_state['selected_stock_view'] = selected_sym
+                                st.session_state['selected_stock_selectbox'] = selected_sym
+                                st.session_state['selected_stock_context'] = tab_name.lower()
+                                st.rerun()
                 
                 # Render Sector Co-Breakout Clustering Alerts
                 clustered_sectors = scored_df[
@@ -930,10 +931,11 @@ if st.session_state.get('run_screener', False):
                                 idx = event_intra.selection.rows[0]
                                 if idx < len(display_intra):
                                     selected_sym = display_intra.iloc[idx]['Symbol']
-                                    st.session_state['selected_stock_view'] = selected_sym
-                                    st.session_state['selected_stock_selectbox'] = selected_sym
-                                    st.session_state['selected_stock_context'] = 'intraday'
-                                    st.rerun()
+                                    if selected_sym != st.session_state.get('selected_stock_view'):
+                                        st.session_state['selected_stock_view'] = selected_sym
+                                        st.session_state['selected_stock_selectbox'] = selected_sym
+                                        st.session_state['selected_stock_context'] = 'intraday'
+                                        st.rerun()
                                     
                             st.info("💡 **Execution**: Enable the *Intraday Workstation* toggle below to receive live 15-min alerts when these trigger.")
                         else:
@@ -970,10 +972,11 @@ if st.session_state.get('run_screener', False):
                                 idx = event_swing.selection.rows[0]
                                 if idx < len(display_swing):
                                     selected_sym = display_swing.iloc[idx]['Symbol']
-                                    st.session_state['selected_stock_view'] = selected_sym
-                                    st.session_state['selected_stock_selectbox'] = selected_sym
-                                    st.session_state['selected_stock_context'] = 'swing'
-                                    st.rerun()
+                                    if selected_sym != st.session_state.get('selected_stock_view'):
+                                        st.session_state['selected_stock_view'] = selected_sym
+                                        st.session_state['selected_stock_selectbox'] = selected_sym
+                                        st.session_state['selected_stock_context'] = 'swing'
+                                        st.rerun()
                         else:
                             st.info("No swing candidates found.")
                             
@@ -1012,10 +1015,11 @@ if st.session_state.get('run_screener', False):
                                 idx = event_long.selection.rows[0]
                                 if idx < len(display_long):
                                     selected_sym = display_long.iloc[idx]['Symbol']
-                                    st.session_state['selected_stock_view'] = selected_sym
-                                    st.session_state['selected_stock_selectbox'] = selected_sym
-                                    st.session_state['selected_stock_context'] = 'long_term'
-                                    st.rerun()
+                                    if selected_sym != st.session_state.get('selected_stock_view'):
+                                        st.session_state['selected_stock_view'] = selected_sym
+                                        st.session_state['selected_stock_selectbox'] = selected_sym
+                                        st.session_state['selected_stock_context'] = 'long_term'
+                                        st.rerun()
                                     
                             st.info("💡 **Exit Rule**: Exit if the daily close drops below the 50D SMA or 200D SMA.")
                         else:
