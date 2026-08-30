@@ -84,7 +84,36 @@ To trade this strategy with positive mathematical expectancy, you must follow th
 
 ---
 
-## 4. AI Developer Hand-off Notes (For Future AIs)
+## 4. Time Horizon Configuration Guide (1-Day vs. Swing vs. Long-Term)
+
+The workstation can be configured to target three distinct trading timeframes. Adjust your parameters and execution rules as follows:
+
+### 1-Day Holding Period (Intraday Scalping)
+* **Goal**: Capture quick 2% to 4% momentum spikes and close all positions before 3:30 PM IST.
+* **Workstation Configuration**:
+  1. Toggle **Enable Intraday Workstation** `ON` in the Streamlit sidebar.
+  2. Input your **Total Trading Capital** and **Max Risk per Trade** (recommended: 1.0% = ₹5,000 for a ₹5L account).
+  3. Keep the **Nifty Intraday VWAP Kill-Switch** card visible. Do not enter any long trades if Nifty is trading below its daily VWAP (indicated by a red warning).
+* **Execution**: Place orders when the **Live 15-Min Breakout Scanner** alerts you that a stock has crossed its Pivot High on a volume spike. Stop-loss is set tight (1.5% below pivot).
+
+### 15-to-20-Day Holding Period (Swing Trading - Default Mode)
+* **Goal**: Ride mid-cap breakouts to a clean 15% target.
+* **Workstation Configuration**:
+  1. In the sidebar, set **Select Model Target Scenario** to `🎯 15% (Target Predictor - Default)`.
+  2. Set **Initial Stop-Loss** to `7.5%` and **Swing Target Profit** to `15.0%`.
+* **Execution**: Place pre-market **Buy GTT Limit** orders at the printed **Pivot High** price. Take profit on 50% of the position at +15%, move the remaining 50% stop to breakeven, and exit on Day 20 if targets aren't reached (Time Exit).
+
+### Long-Term Holding Period (Months to Years Compounding)
+* **Goal**: Buy high-conviction, high-ROCE compounders right as their multi-year markup begins.
+* **Workstation Configuration**:
+  1. In the sidebar, set **Select Model Target Scenario** to `🚀 50% (Multibagger - Strict / Selective)`. Click *Retrain XGBoost Classifier* to build the selective model.
+  2. Check the **Structural Growth Compounder** tab.
+  3. Turn **Enforce Quality (ROCE/ROE >= 18% & Debt/Equity <= 0.5)** `ON`.
+* **Execution**: Buy breakouts using GTT orders. Take swing profit on 50% of the shares at +30% to cover risk. Hold the remaining 50% runner indefinitely, exiting ONLY when the daily candle closes below the **150-day or 200-day Moving Average** (printed on the chart).
+
+---
+
+## 5. AI Developer Hand-off Notes (For Future AIs)
 
 When editing or maintaining this repository, you must adhere to these quantitative guardrails:
 
