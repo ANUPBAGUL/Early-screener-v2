@@ -530,9 +530,14 @@ if st.session_state.get('run_screener', False):
                 )
                 
                 def get_strategy_suggestion(row):
-                    mcap = row.get('market_cap', 1000.0)
-                    vcp = row.get('volatility_contraction_score', 5.0)
+                    close = row.get('close', 0.0)
+                    sma50 = row.get('sma_50', 1.0)
                     sl = row.get('dynamic_sl', 7.5)
+                    vcp = row.get('volatility_contraction_score', 5.0)
+                    mcap = row.get('market_cap', 1000.0)
+                    
+                    if sma50 > 0.0 and (close / sma50) > 1.20:
+                        return f"⚠️ Over-Extended | Risk 0.25% | SL {sl}% | Wait for Pullback"
                     
                     if mcap < 1500.0:
                         return f"⚠️ Microcap Vol | Risk 0.5% | SL {sl}% | Governance OK"
@@ -1300,13 +1305,39 @@ if st.session_state.get('run_screener', False):
                                 help="Book profit on 50% of the position at the swing target. Leave the remaining 50% uncapped as a runner, trailing the 50D or 200D SMA close."
                             )
                         
+                        # 6. Auction Market Volume Profile Analysis
+                        poc_price = record.get('volume_node_poc')
+                        density_val = record.get('volume_node_density')
+                        
+                        is_extended = False
+                        if sma_50_val > 0.0 and (current_price / sma_50_val) > 1.20:
+                            is_extended = True
+                            st.error(f"⚠️ **OVER-EXTENDED WARNING**: This stock is trading {(current_price/sma_50_val - 1.0)*100:.1f}% above its 50-day moving average. Buying breakouts here carries extreme pullback risk. We strongly recommend reducing your risk sizing.")
+                        
+                        if poc_price is not None and density_val is not None:
+                            st.markdown("### 📊 Auction Market Volume Profile (30-Day)")
+                            col_vp1, col_vp2, col_vp3 = st.columns(3)
+                            with col_vp1:
+                                st.metric("Point of Control (POC)", f"Rs. {poc_price:.2f}", help="The price level where the maximum volume occurred over the last 30 trading days.")
+                            with col_vp2:
+                                density_desc = "Heavy Accumulation" if density_val >= 50.0 else "Light Trading"
+                                st.metric("Volume Area Density", f"{density_val:.1f}%", density_desc)
+                            with col_vp3:
+                                dist_from_poc = ((current_price - poc_price) / poc_price) * 100
+                                if dist_from_poc > 15.0:
+                                    st.metric("Dist. to Accumulation Base", f"+{dist_from_poc:.1f}%", "Chase Risk (High)", delta_color="inverse")
+                                else:
+                                    st.metric("Dist. to Accumulation Base", f"+{dist_from_poc:.1f}%", "Within Safe Base (Low)")
+                        
                         # Volatility-Adjusted Position Sizer
                         st.markdown("### 🧮 Volatility-Adjusted Position Sizer")
                         col_sz1, col_sz2, col_sz3 = st.columns(3)
                         with col_sz1:
                             total_cap = st.number_input("Total Trading Capital (Rs.)", min_value=10000.0, value=500000.0, step=10000.0, key="sizer_cap")
                         with col_sz2:
-                            risk_pct = st.slider("Max Capital Risk per Trade (%)", min_value=0.1, max_value=5.0, value=1.0, step=0.1, key="sizer_risk")
+                            # Dynamic capital risk scaling based on extensions/microcaps
+                            default_risk = 0.25 if is_extended else (0.5 if record.get('market_cap', 1000.0) < 1500.0 else 1.0)
+                            risk_pct = st.slider("Max Capital Risk per Trade (%)", min_value=0.1, max_value=5.0, value=default_risk, step=0.1, key="sizer_risk")
                         with col_sz3:
                             rupee_risk = total_cap * (risk_pct / 100.0)
                             price_diff = current_price * (current_sl / 100.0)
@@ -1318,7 +1349,9 @@ if st.session_state.get('run_screener', False):
                         col1, col2 = st.columns(2)
                         
                         with col1:
-                            st.subheader(f"📊 Current Stock: {selected_stock}")
+                            corp_name = record.get('name', '')
+                            full_title = f"{selected_stock} — {corp_name}" if corp_name else selected_stock
+                            st.subheader(f"📊 Current Stock: {full_title}")
                             st.markdown(f"**Close Price & 50-day Moving Average**")
                             st.line_chart(chart_df[['close', '50-Day MA']])
                             st.markdown(f"**Trading Volume**")

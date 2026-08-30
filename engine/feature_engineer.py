@@ -62,6 +62,54 @@ def calculate_technical_features(df):
     # breakout trigger. This replaces the misleading "enter at yesterday's close" assumption.
     df['pivot_high'] = df['high'].rolling(window=15).max()
     
+    # 6. Volume Profile Node Isolation (Rolling 30-Day Window)
+    pocs = []
+    densities = []
+    
+    closes = df['close'].values
+    volumes = df['volume'].values
+    highs = df['high'].values
+    lows = df['low'].values
+    
+    n = len(df)
+    for i in range(n):
+        if i < 30:
+            pocs.append(np.nan)
+            densities.append(np.nan)
+            continue
+            
+        c_slice = closes[i-29:i+1]
+        v_slice = volumes[i-29:i+1]
+        h_slice = highs[i-29:i+1]
+        l_slice = lows[i-29:i+1]
+        
+        min_p = np.min(l_slice)
+        max_p = np.max(h_slice)
+        
+        if max_p == min_p:
+            pocs.append(min_p)
+            densities.append(100.0)
+            continue
+            
+        bins = np.linspace(min_p, max_p, 11)
+        hist, bin_edges = np.histogram(c_slice, bins=bins, weights=v_slice)
+        
+        max_bin_idx = np.argmax(hist)
+        poc_price = (bin_edges[max_bin_idx] + bin_edges[max_bin_idx+1]) / 2.0
+        
+        tot_vol = np.sum(v_slice)
+        if tot_vol > 0:
+            mask = (c_slice >= poc_price * 0.97) & (c_slice <= poc_price * 1.03)
+            density = (np.sum(v_slice[mask]) / tot_vol) * 100.0
+        else:
+            density = 0.0
+            
+        pocs.append(round(float(poc_price), 2))
+        densities.append(round(float(density), 1))
+        
+    df['volume_node_poc'] = pocs
+    df['volume_node_density'] = densities
+    
     return df
 
 def run_feature_engineering():
@@ -81,12 +129,19 @@ def run_feature_engineering():
     from datetime import datetime
     to_date = datetime.today().strftime('%Y-%m-%d')
     
-    # Schema migration: add pivot_high column if it doesn't exist (existing DB support)
+    # Schema migration: add pivot_high, volume_node_poc, and volume_node_density if they don't exist
     try:
         cursor.execute("ALTER TABLE technical_features ADD COLUMN pivot_high REAL")
         conn.commit()
     except Exception:
         pass  # Column already exists
+        
+    try:
+        cursor.execute("ALTER TABLE technical_features ADD COLUMN volume_node_poc REAL")
+        cursor.execute("ALTER TABLE technical_features ADD COLUMN volume_node_density REAL")
+        conn.commit()
+    except Exception:
+        pass  # Columns already exist
     
     for inst in instruments:
         # Delete today's recorded features first to prevent incomplete intraday calculation poisoning
@@ -134,7 +189,9 @@ def run_feature_engineering():
                 row['sma_200'],
                 row['high_52w'],
                 row['stage_2_flag'],
-                row.get('pivot_high')
+                row.get('pivot_high'),
+                row.get('volume_node_poc'),
+                row.get('volume_node_density')
             )
             for _, row in df.iterrows()
         ]
@@ -143,8 +200,8 @@ def run_feature_engineering():
         cursor.executemany("""
             INSERT OR REPLACE INTO technical_features 
             (instrument_key, timestamp, volatility_contraction_score, volume_surge_score, momentum_score,
-             sma_50, sma_150, sma_200, high_52w, stage_2_flag, pivot_high)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             sma_50, sma_150, sma_200, high_52w, stage_2_flag, pivot_high, volume_node_poc, volume_node_density)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, insert_data)
         
         total_inserted += len(insert_data)
