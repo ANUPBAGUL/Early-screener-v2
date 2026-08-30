@@ -138,7 +138,8 @@ def run_backtest_ledger(confluence_threshold=85.0, stop_loss_pct=7.5, target_pro
         conn.close()
         return {}, pd.DataFrame(), pd.DataFrame()
         
-    # 4. Apply 20-day Cooldown per stock (using trading days, not calendar days)
+    # 4. Apply Cooldown per stock based on config.HOLDING_PERIOD (using trading days, not calendar days)
+    holding_period = int(getattr(config, 'HOLDING_PERIOD', 20))
     filtered_rows = []
     last_trigger_date = {}
     
@@ -151,7 +152,7 @@ def run_backtest_ledger(confluence_threshold=85.0, stop_loss_pct=7.5, target_pro
             trading_days_since = np.busday_count(
                 last_trigger_date[sym].date(), dt.date()
             )
-            if trading_days_since < 20:
+            if trading_days_since < holding_period:
                 continue
                 
         last_trigger_date[sym] = dt
